@@ -18,7 +18,7 @@ public class OrderReceivedEvent : IntegrationEvent
     {
         EventType = nameof(OrderReceivedEvent);
     }
-    
+
     public string OrderId { get; set; } = string.Empty;
     public string CustomerId { get; set; } = string.Empty;
     public DateTime ReceivedAt { get; set; }
@@ -31,7 +31,7 @@ public class OrderValidatedEvent : IntegrationEvent
     {
         EventType = nameof(OrderValidatedEvent);
     }
-    
+
     public string OrderId { get; set; } = string.Empty;
     public bool IsValid { get; set; }
     public List<string> ValidationErrors { get; set; } = new();
@@ -44,7 +44,7 @@ public class OrderEnrichedEvent : IntegrationEvent
     {
         EventType = nameof(OrderEnrichedEvent);
     }
-    
+
     public string OrderId { get; set; } = string.Empty;
     public Dictionary<string, object> EnrichmentData { get; set; } = new();
     public DateTime EnrichedAt { get; set; }
@@ -56,7 +56,7 @@ public class OrderConfirmedEvent : IntegrationEvent
     {
         EventType = nameof(OrderConfirmedEvent);
     }
-    
+
     public string OrderId { get; set; } = string.Empty;
     public string ConfirmationId { get; set; } = string.Empty;
     public decimal TotalAmount { get; set; }
@@ -70,10 +70,31 @@ public class OrderFailedEvent : IntegrationEvent
     {
         EventType = nameof(OrderFailedEvent);
     }
-    
+
     public string OrderId { get; set; } = string.Empty;
     public string FailureReason { get; set; } = string.Empty;
     public List<string> ErrorDetails { get; set; } = new();
     public DateTime FailedAt { get; set; }
     public bool IsRetryable { get; set; }
+}
+
+public class HighValueErrorEvent : IntegrationEvent
+{
+    public HighValueErrorEvent()
+    {
+        EventType = nameof(HighValueErrorEvent);
+    }
+
+    public string OrderId { get; set; } = string.Empty;
+    public string CustomerId { get; set; } = string.Empty;
+    public string CustomerEmail { get; set; } = string.Empty;
+    public string ErrorCategory { get; set; } = string.Empty;
+    public string ErrorMessage { get; set; } = string.Empty;
+    public string TechnicalDetails { get; set; } = string.Empty;
+    public decimal OrderValue { get; set; }
+    public string CustomerTier { get; set; } = string.Empty;
+    public DateTime ErrorOccurredAt { get; set; }
+    public int RetryCount { get; set; }
+    public string ProcessingStage { get; set; } = string.Empty;
+    public Dictionary<string, object> ContextData { get; set; } = new();
 }

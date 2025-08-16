@@ -1,7 +1,7 @@
+using System.ComponentModel.DataAnnotations;
 using BidOne.ExternalOrderApi.Services;
 using BidOne.Shared.Models;
 using Microsoft.AspNetCore.Mvc;
-using System.ComponentModel.DataAnnotations;
 
 namespace BidOne.ExternalOrderApi.Controllers;
 

@@ -1,50 +1,180 @@
-# 部署指南
+# BidOne Integration Platform - 部署指南
 
-## 概述
+## 📋 概述
 
-本文档详细说明如何将 BidOne Integration Platform 部署到 Azure 云平台，包括开发环境、测试环境和生产环境的部署步骤。
+本指南将指导您完成 BidOne Integration Platform 的完整部署，包括 Azure 基础设施、微服务应用和 **AI 智能客户沟通系统**的端到端部署。
 
-## 前置要求
+## 🎯 系统架构
 
-### 工具和软件
-- [Azure CLI](https://docs.microsoft.com/en-us/cli/azure/install-azure-cli) >= 2.40.0
-- [.NET 8.0 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)
-- [Docker Desktop](https://www.docker.com/products/docker-desktop)
-- [Git](https://git-scm.com/downloads)
-- [PowerShell 7+](https://github.com/PowerShell/PowerShell) (推荐)
+```mermaid
+graph TB
+    subgraph "Azure Cloud"
+        subgraph "API 层"
+            ExtAPI[External Order API<br/>端口: 8080]
+            IntAPI[Internal System API<br/>端口: 8081]
+            APIM[API Management<br/>统一网关]
+        end
+        
+        subgraph "业务逻辑层"
+            OrderFunc[Order Integration Function<br/>订单处理流程]
+            AIFunc[Customer Communication Function<br/>🤖 AI智能沟通]
+            LogicApp[Logic Apps<br/>工作流编排]
+        end
+        
+        subgraph "消息传递"
+            SB[Service Bus<br/>可靠消息传递]
+            EG[Event Grid<br/>事件驱动通信]
+        end
+        
+        subgraph "数据存储"
+            SQL[(SQL Database<br/>业务数据)]
+            Cosmos[(Cosmos DB<br/>产品目录)]
+            Redis[(Redis Cache<br/>高速缓存)]
+        end
+        
+        subgraph "监控与安全"
+            AI_Insights[Application Insights<br/>应用监控]
+            KV[Key Vault<br/>密钥管理]
+            Grafana[Grafana<br/>业务仪表板]
+        end
+        
+        subgraph "AI 集成"
+            OpenAI[OpenAI API<br/>LangChain集成]
+        end
+    end
+    
+    ExtAPI --> SB
+    SB --> OrderFunc
+    OrderFunc --> EG
+    EG --> AIFunc
+    AIFunc --> OpenAI
+    AIFunc --> SB
+
+## 🔧 前置要求
+
+### 软件要求
+- **Azure CLI** 2.50+
+- **.NET 8.0 SDK**
+- **Docker Desktop**
+- **Git**
+- **PowerShell 7.0+** 或 **Bash**
 
 ### Azure 权限要求
-- Azure 订阅的 Owner 或 Contributor 权限
-- Azure AD 应用注册权限
-- 能够创建服务主体的权限
+- Azure 订阅**所有者**或**贡献者**权限
+- 能够创建资源组和 Azure AD 应用程序
+- Service Principal 创建权限（用于 CI/CD）
 
-## 快速开始
+### 可选要求（AI 功能）
+- **OpenAI API Key**（用于真实 AI 功能，否则使用智能模拟）
 
-### 1. 克隆项目并初始化
+## 🚀 快速部署
 
-```bash
-# 克隆项目
-git clone https://github.com/your-org/BidOne-Integration-Demo.git
-cd BidOne-Integration-Demo
-
-# 运行初始化脚本
-./scripts/setup-dev-env.sh
-```
-
-### 2. 配置 Azure 环境
+### 步骤 1: 环境准备
 
 ```bash
+# 克隆代码库
+git clone <repository-url>
+cd FoodOrderConnect
+
 # 登录 Azure
 az login
+az account set --subscription "<your-subscription-id>"
 
-# 选择目标订阅
-az account set --subscription "Your-Subscription-ID"
-
-# 创建资源组
-az group create --name bidone-demo-rg --location eastus
+# 设置环境变量
+export RESOURCE_GROUP="rg-bidone-demo"
+export LOCATION="East US"
+export ENVIRONMENT="dev"
 ```
 
-### 3. 一键部署
+### 步骤 2: 一键部署基础设施
+
+```bash
+# 创建资源组
+az group create --name $RESOURCE_GROUP --location "$LOCATION"
+
+# 部署完整基础设施（包含AI沟通系统）
+az deployment group create \
+  --resource-group $RESOURCE_GROUP \
+  --template-file infra/main.bicep \
+  --parameters environmentName=$ENVIRONMENT \
+               sqlAdminPassword="SecurePassword123!" \
+  --name "bidone-infrastructure-deployment"
+```
+
+### 步骤 3: 配置 AI 功能（可选）
+
+```bash
+# 如果您有 OpenAI API Key
+KEY_VAULT_NAME=$(az deployment group show \
+  --resource-group $RESOURCE_GROUP \
+  --name "bidone-infrastructure-deployment" \
+  --query properties.outputs.keyVaultName.value -o tsv)
+
+# 添加 OpenAI API Key 到 Key Vault
+az keyvault secret set \
+  --vault-name $KEY_VAULT_NAME \
+  --name "OpenAI-ApiKey" \
+  --value "your-openai-api-key"
+```
+
+### 步骤 4: 部署应用程序
+
+```bash
+# 构建所有项目
+dotnet build BidOne.sln
+
+# 发布 Function Apps
+dotnet publish src/OrderIntegrationFunction -o publish/OrderIntegrationFunction
+dotnet publish src/CustomerCommunicationFunction -o publish/CustomerCommunicationFunction
+
+# 部署（如果配置了 CI/CD，推送代码即可自动部署）
+git add .
+git commit -m "Deploy to Azure"
+git push origin main
+```
+
+### 3. 配置 GitHub Secrets (用于 CI/CD)
+
+如果要使用 GitHub Actions 进行自动化部署，需要配置以下 Secrets：
+
+#### 必需的 GitHub Secrets：
+
+```bash
+# Azure 认证凭据
+AZURE_CREDENTIALS='{"clientId":"<client-id>","clientSecret":"<client-secret>","subscriptionId":"<subscription-id>","tenantId":"<tenant-id>"}'
+
+# Azure 基础信息
+AZURE_SUBSCRIPTION_ID="<your-subscription-id>"
+RESOURCE_GROUP="bidone-demo-rg"
+
+# Container Registry 认证
+ACR_LOGIN_SERVER="<your-acr-name>.azurecr.io"
+ACR_USERNAME="<acr-username>"
+ACR_PASSWORD="<acr-password>"
+
+# SQL Server 认证
+SQL_ADMIN_PASSWORD="<your-secure-password>"
+
+# Azure Functions 相关
+AZURE_FUNCTION_APP_NAME="<function-app-name>"
+AZURE_FUNCTION_PUBLISH_PROFILE="<publish-profile-content>"
+```
+
+#### 配置步骤：
+
+1. 创建 Azure Service Principal：
+```bash
+az ad sp create-for-rbac --name "bidone-github-actions" \
+  --role contributor \
+  --scopes /subscriptions/{subscription-id} \
+  --sdk-auth
+```
+
+2. 在 GitHub 仓库设置中添加上述 Secrets
+
+3. 触发 GitHub Actions 工作流进行自动部署
+
+### 4. 一键部署
 
 ```bash
 # 执行一键部署脚本

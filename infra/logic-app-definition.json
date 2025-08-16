@@ -14,6 +14,12 @@
                 "description": "Azure Function App base URL"
             }
         },
+        "functionAppCode": {
+            "type": "securestring",
+            "metadata": {
+                "description": "Azure Function App access code"
+            }
+        },
         "internalApiUrl": {
             "type": "string",
             "metadata": {
@@ -84,14 +90,28 @@
             },
             "runAfter": {}
         },
+        "track_order_processing_start": {
+            "type": "Compose",
+            "inputs": {
+                "eventName": "OrderProcessingStarted",
+                "orderId": "@{body('parse_order_message')?['orderId']}",
+                "customerId": "@{body('parse_order_message')?['customerId']}",
+                "timestamp": "@{utcNow()}",
+                "workflowRunId": "@{workflow()['run']['name']}"
+            },
+            "runAfter": {
+                "parse_order_message": [
+                    "Succeeded"
+                ]
+            }
+        },
         "validate_order": {
             "type": "Http",
             "inputs": {
                 "method": "POST",
                 "uri": "@{parameters('functionAppUrl')}/api/ValidateOrder",
                 "headers": {
-                    "Content-Type": "application/json",
-                    "x-functions-key": "@parameters('$connections')['azurefunctions']['connectionId']"
+                    "Content-Type": "application/json"
                 },
                 "body": "@body('parse_order_message')",
                 "timeout": "PT2M",
@@ -99,10 +119,15 @@
                     "type": "fixed",
                     "count": 3,
                     "interval": "PT30S"
+                },
+                "authentication": {
+                    "type": "QueryString",
+                    "name": "code",
+                    "value": "@parameters('functionAppCode')"
                 }
             },
             "runAfter": {
-                "parse_order_message": [
+                "track_order_processing_start": [
                     "Succeeded"
                 ]
             }
@@ -126,8 +151,7 @@
                         "method": "POST",
                         "uri": "@{parameters('functionAppUrl')}/api/EnrichOrderData",
                         "headers": {
-                            "Content-Type": "application/json",
-                            "x-functions-key": "@parameters('$connections')['azurefunctions']['connectionId']"
+                            "Content-Type": "application/json"
                         },
                         "body": "@body('parse_order_message')",
                         "timeout": "PT2M",
@@ -135,6 +159,11 @@
                             "type": "fixed",
                             "count": 3,
                             "interval": "PT30S"
+                        },
+                        "authentication": {
+                            "type": "QueryString",
+                            "name": "code",
+                            "value": "@parameters('functionAppCode')"
                         }
                     }
                 },
@@ -144,8 +173,7 @@
                         "method": "POST",
                         "uri": "@{parameters('internalApiUrl')}/api/orders",
                         "headers": {
-                            "Content-Type": "application/json",
-                            "Authorization": "Bearer @{parameters('$connections')['internal-api']['connectionId']}"
+                            "Content-Type": "application/json"
                         },
                         "body": "@body('enrich_order_data')",
                         "timeout": "PT2M",

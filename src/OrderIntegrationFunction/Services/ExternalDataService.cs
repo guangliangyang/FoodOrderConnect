@@ -1,6 +1,6 @@
+using System.Text.Json;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
-using System.Text.Json;
 
 namespace BidOne.OrderIntegrationFunction.Services;
 
@@ -290,7 +290,7 @@ public class ExternalDataService : IExternalDataService
 
         var methods = new[] { "Standard", "Express", "Overnight" };
         var carriers = new[] { "FedEx", "UPS", "DHL", "USPS" };
-        
+
         var random = new Random(deliveryAddress.GetHashCode());
         var baseDate = DateTime.UtcNow.Date.AddDays(1);
 

@@ -1,8 +1,8 @@
+using System.ComponentModel.DataAnnotations;
 using BidOne.InternalSystemApi.Services;
 using BidOne.Shared.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using System.ComponentModel.DataAnnotations;
 
 namespace BidOne.InternalSystemApi.Controllers;
 
@@ -303,7 +303,7 @@ public class UpdateOrderStatusRequest
 {
     [Required]
     public OrderStatus Status { get; set; }
-    
+
     public string? Notes { get; set; }
 }
 

@@ -1,23 +1,28 @@
+using System.Diagnostics;
+using System.Text.Json;
 using BidOne.Shared.Events;
+using BidOne.Shared.Metrics;
 using BidOne.Shared.Models;
 using BidOne.Shared.Services;
 using Microsoft.Extensions.Caching.Distributed;
-using System.Text.Json;
 
 namespace BidOne.ExternalOrderApi.Services;
 
 public class OrderService : IOrderService
 {
     private readonly IMessagePublisher _messagePublisher;
+    private readonly IDashboardEventPublisher _dashboardEventPublisher;
     private readonly IDistributedCache _cache;
     private readonly ILogger<OrderService> _logger;
 
     public OrderService(
         IMessagePublisher messagePublisher,
+        IDashboardEventPublisher dashboardEventPublisher,
         IDistributedCache cache,
         ILogger<OrderService> logger)
     {
         _messagePublisher = messagePublisher;
+        _dashboardEventPublisher = dashboardEventPublisher;
         _cache = cache;
         _logger = logger;
     }
@@ -26,6 +31,9 @@ public class OrderService : IOrderService
     {
         var orderId = GenerateOrderId();
         var correlationId = Guid.NewGuid().ToString();
+
+        // 📊 开始监控订单处理时间
+        var stopwatch = Stopwatch.StartNew();
 
         try
         {
@@ -75,6 +83,25 @@ public class OrderService : IOrderService
             _logger.LogInformation("Order {OrderId} created and published successfully. CorrelationId: {CorrelationId}",
                 orderId, correlationId);
 
+            // 📊 记录业务指标
+            BusinessMetrics.OrdersProcessed.WithLabels("received", "ExternalOrderApi").Inc();
+            BusinessMetrics.PendingOrders.WithLabels("ExternalOrderApi").Inc();
+            BusinessMetrics.OrderProcessingTime.WithLabels("ExternalOrderApi", "CreateOrder")
+                .Observe(stopwatch.Elapsed.TotalSeconds);
+
+            // 🎯 发布仪表板指标事件 (轻量级，不影响主流程)
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await PublishDashboardMetricsAsync(cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to publish dashboard metrics, but order processing continues normally");
+                }
+            }, cancellationToken);
+
             return new OrderResponse
             {
                 OrderId = orderId,
@@ -85,6 +112,9 @@ public class OrderService : IOrderService
         }
         catch (Exception ex)
         {
+            // 📊 记录失败指标
+            BusinessMetrics.OrdersProcessed.WithLabels("failed", "ExternalOrderApi").Inc();
+
             _logger.LogError(ex, "Failed to create order {OrderId}. CorrelationId: {CorrelationId}",
                 orderId, correlationId);
             throw;
@@ -245,5 +275,123 @@ public class OrderService : IOrderService
     {
         // This would typically be injected via IHttpContextAccessor
         return "Unknown"; // Placeholder
+    }
+
+    /// <summary>
+    /// 发布仪表板指标更新事件 (轻量级，异步执行)
+    /// </summary>
+    private async Task PublishDashboardMetricsAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            // 模拟从缓存或数据库获取当前订单统计数据
+            var todayOrdersCount = await GetTodayOrdersCountFromCache();
+            var totalOrdersCount = await GetTotalOrdersCountFromCache();
+            var pendingOrdersCount = await GetPendingOrdersCountFromCache();
+
+            // 发布订单指标更新事件到 Event Grid
+            await _dashboardEventPublisher.PublishOrderMetricsAsync(
+                totalOrders: totalOrdersCount,
+                todayOrders: todayOrdersCount,
+                pendingOrders: pendingOrdersCount,
+                status: "Order Received",
+                cancellationToken);
+
+            _logger.LogDebug("📊 Dashboard order metrics published successfully");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to publish dashboard metrics");
+            // 不重新抛出异常，避免影响主业务流程
+        }
+    }
+
+    /// <summary>
+    /// 从缓存获取今日订单数 (模拟实现)
+    /// </summary>
+    private async Task<int> GetTodayOrdersCountFromCache()
+    {
+        try
+        {
+            var cacheKey = $"dashboard:orders:today:{DateTime.UtcNow:yyyy-MM-dd}";
+            var countStr = await _cache.GetStringAsync(cacheKey);
+
+            if (int.TryParse(countStr, out var count))
+            {
+                count++; // 新订单加 1
+                await _cache.SetStringAsync(cacheKey, count.ToString(),
+                    new DistributedCacheEntryOptions { AbsoluteExpirationRelativeToNow = TimeSpan.FromDays(1) });
+                return count;
+            }
+            else
+            {
+                // 首次设置为 1
+                await _cache.SetStringAsync(cacheKey, "1",
+                    new DistributedCacheEntryOptions { AbsoluteExpirationRelativeToNow = TimeSpan.FromDays(1) });
+                return 1;
+            }
+        }
+        catch
+        {
+            return 1; // 默认值
+        }
+    }
+
+    /// <summary>
+    /// 从缓存获取总订单数 (模拟实现)
+    /// </summary>
+    private async Task<int> GetTotalOrdersCountFromCache()
+    {
+        try
+        {
+            var cacheKey = "dashboard:orders:total";
+            var countStr = await _cache.GetStringAsync(cacheKey);
+
+            if (int.TryParse(countStr, out var count))
+            {
+                count++; // 新订单加 1
+                await _cache.SetStringAsync(cacheKey, count.ToString());
+                return count;
+            }
+            else
+            {
+                // 首次设置为 1
+                await _cache.SetStringAsync(cacheKey, "1");
+                return 1;
+            }
+        }
+        catch
+        {
+            return 1; // 默认值
+        }
+    }
+
+    /// <summary>
+    /// 从缓存获取待处理订单数 (模拟实现)
+    /// </summary>
+    private async Task<int> GetPendingOrdersCountFromCache()
+    {
+        try
+        {
+            var cacheKey = "dashboard:orders:pending";
+            var countStr = await _cache.GetStringAsync(cacheKey);
+
+            if (int.TryParse(countStr, out var count))
+            {
+                count++; // 新待处理订单加 1
+                await _cache.SetStringAsync(cacheKey, count.ToString());
+                return count;
+            }
+            else
+            {
+                // 首次设置为 1
+                await _cache.SetStringAsync(cacheKey, "1");
+                return 1;
+            }
+        }
+        catch
+        {
+            return 1; // 默认值
+        }
     }
 }

@@ -1,8 +1,8 @@
+using System.Text.Json;
 using BidOne.OrderIntegrationFunction.Services;
 using BidOne.Shared.Models;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Extensions.Logging;
-using System.Text.Json;
 
 namespace BidOne.OrderIntegrationFunction.Functions;
 
@@ -94,7 +94,7 @@ public class OrderEnrichmentFunction
             if (!validationResponse.ValidationResult.IsValid)
             {
                 _logger.LogWarning("Skipping enrichment for invalid order {OrderId}", validationResponse.Order.Id);
-                
+
                 // Send to failed queue instead
                 var failedResponse = new OrderEnrichmentResponse
                 {
@@ -170,7 +170,7 @@ public class OrderEnrichmentFunction
 
             if (!enrichmentResponse.EnrichmentResult.IsSuccessful)
             {
-                _logger.LogWarning("Skipping processing for unsuccessful enrichment of order {OrderId}", 
+                _logger.LogWarning("Skipping processing for unsuccessful enrichment of order {OrderId}",
                     enrichmentResponse.Order.Id);
                 return null;
             }

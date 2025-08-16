@@ -1,15 +1,17 @@
+using System.Text;
+using System.Text.Json;
+using Azure.Messaging.ServiceBus;
 using BidOne.InternalSystemApi.Data;
 using BidOne.InternalSystemApi.Mappings;
 using BidOne.InternalSystemApi.Services;
+using BidOne.Shared.Metrics;
 using BidOne.Shared.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using Prometheus;
 using Serilog;
-using System.Text;
-using System.Text.Json;
-using Azure.Messaging.ServiceBus;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -79,7 +81,7 @@ builder.Services.AddDbContext<BidOneDbContext>(options =>
             sqlOptions.EnableRetryOnFailure(3, TimeSpan.FromSeconds(10), null);
             sqlOptions.CommandTimeout(30);
         });
-    
+
     if (builder.Environment.IsDevelopment())
     {
         options.EnableSensitiveDataLogging();
@@ -91,7 +93,7 @@ builder.Services.AddDbContext<BidOneDbContext>(options =>
 var serviceBusConnectionString = builder.Configuration.GetConnectionString("ServiceBus");
 if (!string.IsNullOrEmpty(serviceBusConnectionString))
 {
-    builder.Services.AddSingleton<ServiceBusClient>(provider => 
+    builder.Services.AddSingleton<ServiceBusClient>(provider =>
         new ServiceBusClient(serviceBusConnectionString));
 }
 
@@ -131,6 +133,14 @@ builder.Services.AddScoped<IOrderProcessingService, OrderProcessingService>();
 builder.Services.AddScoped<IInventoryService, InventoryService>();
 builder.Services.AddScoped<ISupplierNotificationService, SupplierNotificationService>();
 builder.Services.AddScoped<IMessagePublisher, ServiceBusMessagePublisher>();
+
+// 📊 Add Prometheus metrics (演示监控能力)
+builder.Services.AddSingleton<MetricServer>(provider =>
+{
+    var metricServer = new MetricServer(hostname: "*", port: 9091); // 不同端口避免冲突
+    metricServer.Start();
+    return metricServer;
+});
 
 // Add health checks
 var healthChecksBuilder = builder.Services.AddHealthChecks()
@@ -184,6 +194,10 @@ if (app.Environment.IsDevelopment())
 app.UseHttpsRedirection();
 app.UseCors("AllowIntegrationSources");
 
+// 📊 Enable Prometheus metrics endpoint (/metrics)
+app.UseMetricServer();
+app.UseHttpMetrics(); // 自动收集 HTTP 请求指标
+
 // Add request logging
 app.UseSerilogRequestLogging();
 
@@ -231,7 +245,7 @@ if (app.Environment.IsDevelopment())
 {
     using var scope = app.Services.CreateScope();
     var dbContext = scope.ServiceProvider.GetRequiredService<BidOneDbContext>();
-    
+
     try
     {
         await dbContext.Database.MigrateAsync();

@@ -60,7 +60,7 @@ public class OrderValidationService : IOrderValidationService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error during order validation for order {OrderId}", order.Id);
-            
+
             result.IsValid = false;
             result.Errors.Add(new ValidationError
             {
@@ -129,7 +129,7 @@ public class OrderValidationService : IOrderValidationService
         {
             // Check if customer exists and is active
             var customer = await _dbContext.Customers.FindAsync(new object[] { order.CustomerId }, cancellationToken);
-            
+
             if (customer == null)
             {
                 result.Errors.Add(new ValidationError
@@ -212,7 +212,7 @@ public class OrderValidationService : IOrderValidationService
             try
             {
                 var product = await _dbContext.Products.FindAsync(new object[] { item.ProductId }, cancellationToken);
-                
+
                 if (product == null)
                 {
                     result.Errors.Add(new ValidationError
@@ -238,7 +238,7 @@ public class OrderValidationService : IOrderValidationService
                     // Validate price matches (with tolerance for small differences)
                     var priceDifference = Math.Abs(item.UnitPrice - product.UnitPrice);
                     var tolerance = product.UnitPrice * 0.05m; // 5% tolerance
-                    
+
                     if (priceDifference > tolerance)
                     {
                         result.Errors.Add(new ValidationError
@@ -316,8 +316,8 @@ public class OrderValidationService : IOrderValidationService
                     Code = "INSUFFICIENT_LEAD_TIME",
                     Message = $"Delivery date requires at least {minBusinessDays} business day(s) notice",
                     AttemptedValue = order.DeliveryDate,
-                    Context = new Dictionary<string, object> 
-                    { 
+                    Context = new Dictionary<string, object>
+                    {
                         ["MinBusinessDays"] = minBusinessDays,
                         ["BusinessDaysFromNow"] = businessDaysFromNow
                     }

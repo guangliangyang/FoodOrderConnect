@@ -88,7 +88,7 @@ public class MappingProfile : Profile
         Dictionary<string, object> enrichmentData)
     {
         var merged = new Dictionary<string, object>(originalMetadata);
-        
+
         foreach (var kvp in enrichmentData)
         {
             merged[kvp.Key] = kvp.Value;

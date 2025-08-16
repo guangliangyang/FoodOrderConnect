@@ -1,11 +1,12 @@
+using System.Text.Json;
 using AutoMapper;
 using BidOne.InternalSystemApi.Data;
 using BidOne.InternalSystemApi.Data.Entities;
 using BidOne.Shared.Events;
+using BidOne.Shared.Metrics;
 using BidOne.Shared.Models;
 using BidOne.Shared.Services;
 using Microsoft.EntityFrameworkCore;
-using System.Text.Json;
 
 namespace BidOne.InternalSystemApi.Services;
 
@@ -36,11 +37,14 @@ public class OrderProcessingService : IOrderProcessingService
 
     public async Task<OrderResponse> ProcessOrderAsync(ProcessOrderRequest request, CancellationToken cancellationToken = default)
     {
+        // 📊 开始监控订单处理时间
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+
         using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
-        
+
         try
         {
-            _logger.LogInformation("Processing order {OrderId} for customer {CustomerId}", 
+            _logger.LogInformation("Processing order {OrderId} for customer {CustomerId}",
                 request.Order.Id, request.Order.CustomerId);
 
             // Check if order already exists
@@ -49,7 +53,7 @@ public class OrderProcessingService : IOrderProcessingService
                 .FirstOrDefaultAsync(o => o.Id == request.Order.Id, cancellationToken);
 
             OrderEntity orderEntity;
-            
+
             if (existingOrder == null)
             {
                 // Create new order
@@ -93,13 +97,19 @@ public class OrderProcessingService : IOrderProcessingService
 
             if (!reservationResult.IsSuccessful)
             {
-                _logger.LogWarning("Inventory reservation failed for order {OrderId}: {Reason}", 
+                _logger.LogWarning("Inventory reservation failed for order {OrderId}: {Reason}",
                     orderEntity.Id, reservationResult.FailureReason);
-                
+
                 orderEntity.Status = OrderStatus.Failed;
                 orderEntity.Metadata["FailureReason"] = reservationResult.FailureReason ?? "Inventory reservation failed";
-                
+
                 await SaveOrderEvent(orderEntity.Id, "InventoryReservationFailed", reservationResult, cancellationToken);
+
+                // 🎯 发布高价值错误事件用于智能沟通
+                if (orderEntity.TotalAmount > 1000m)
+                {
+                    await PublishHighValueProcessingError(orderEntity, "Inventory", reservationResult.FailureReason ?? "Inventory reservation failed", cancellationToken);
+                }
             }
             else
             {
@@ -120,6 +130,12 @@ public class OrderProcessingService : IOrderProcessingService
                     orderEntity.Status = OrderStatus.Failed;
                     orderEntity.Metadata["FailureReason"] = "No suitable supplier found";
                     await SaveOrderEvent(orderEntity.Id, "NoSupplierFound", null, cancellationToken);
+
+                    // 🎯 发布高价值错误事件用于智能沟通
+                    if (orderEntity.TotalAmount > 1000m)
+                    {
+                        await PublishHighValueProcessingError(orderEntity, "Supplier", "No suitable supplier found", cancellationToken);
+                    }
                 }
             }
 
@@ -155,7 +171,16 @@ public class OrderProcessingService : IOrderProcessingService
                 await _messagePublisher.PublishEventAsync(failedEvent, cancellationToken);
             }
 
-            _logger.LogInformation("Order {OrderId} processed successfully with status {Status}", 
+            // 📊 记录成功处理的订单指标
+            BusinessMetrics.OrdersProcessed.WithLabels("processed", "InternalSystemApi").Inc();
+            BusinessMetrics.OrderProcessingTime.WithLabels("InternalSystemApi", "ProcessOrder")
+                .Observe(stopwatch.Elapsed.TotalSeconds);
+            if (orderEntity.Status == OrderStatus.Confirmed)
+            {
+                BusinessMetrics.PendingOrders.WithLabels("InternalSystemApi").Dec(); // 减少待处理数量
+            }
+
+            _logger.LogInformation("Order {OrderId} processed successfully with status {Status}",
                 orderEntity.Id, orderEntity.Status);
 
             return new OrderResponse
@@ -169,6 +194,10 @@ public class OrderProcessingService : IOrderProcessingService
         catch (Exception ex)
         {
             await transaction.RollbackAsync(cancellationToken);
+
+            // 📊 记录失败指标
+            BusinessMetrics.OrdersProcessed.WithLabels("failed", "InternalSystemApi").Inc();
+
             _logger.LogError(ex, "Failed to process order {OrderId}", request.Order.Id);
             throw;
         }
@@ -197,7 +226,7 @@ public class OrderProcessingService : IOrderProcessingService
     public async Task<OrderResponse> UpdateOrderStatusAsync(string orderId, OrderStatus status, string? notes = null, CancellationToken cancellationToken = default)
     {
         var order = await _dbContext.Orders.FirstOrDefaultAsync(o => o.Id == orderId, cancellationToken);
-        
+
         if (order == null)
             throw new InvalidOperationException($"Order {orderId} not found");
 
@@ -213,7 +242,7 @@ public class OrderProcessingService : IOrderProcessingService
         await SaveOrderEvent(orderId, "StatusChanged", new { PreviousStatus = previousStatus, NewStatus = status, Notes = notes }, cancellationToken);
         await _dbContext.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation("Order {OrderId} status updated from {PreviousStatus} to {NewStatus}", 
+        _logger.LogInformation("Order {OrderId} status updated from {PreviousStatus} to {NewStatus}",
             orderId, previousStatus, status);
 
         return new OrderResponse
@@ -228,7 +257,7 @@ public class OrderProcessingService : IOrderProcessingService
     public async Task<bool> CancelOrderAsync(string orderId, string reason, CancellationToken cancellationToken = default)
     {
         using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
-        
+
         try
         {
             var order = await _dbContext.Orders
@@ -311,7 +340,7 @@ public class OrderProcessingService : IOrderProcessingService
     {
         // Simple supplier determination logic - can be enhanced with more sophisticated rules
         var productIds = order.Items.Select(i => i.ProductId).ToList();
-        
+
         var supplier = await _dbContext.Suppliers
             .Where(s => s.IsActive && s.Products.Any(p => productIds.Contains(p.Id)))
             .FirstOrDefaultAsync(cancellationToken);
@@ -333,6 +362,56 @@ public class OrderProcessingService : IOrderProcessingService
         };
 
         await _dbContext.OrderEvents.AddAsync(orderEvent, cancellationToken);
+    }
+
+    private async Task PublishHighValueProcessingError(OrderEntity orderEntity, string errorCategory, string errorMessage, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var errorEvent = new HighValueErrorEvent
+            {
+                OrderId = orderEntity.Id,
+                CustomerId = orderEntity.CustomerId,
+                CustomerEmail = orderEntity.Customer?.Email ?? "unknown@example.com",
+                ErrorCategory = errorCategory,
+                ErrorMessage = errorMessage,
+                TechnicalDetails = $"Processing error in {errorCategory} stage",
+                OrderValue = orderEntity.TotalAmount,
+                CustomerTier = GetCustomerTierByOrderValue(orderEntity.TotalAmount),
+                ErrorOccurredAt = DateTime.UtcNow,
+                RetryCount = 0,
+                ProcessingStage = "Processing",
+                Source = "InternalSystemApi",
+                CorrelationId = orderEntity.Metadata.GetValueOrDefault("CorrelationId", string.Empty).ToString() ?? string.Empty,
+                ContextData = new Dictionary<string, object>
+                {
+                    ["OrderItemCount"] = orderEntity.Items.Count,
+                    ["SupplierId"] = orderEntity.SupplierId ?? "Not assigned",
+                    ["ProcessingDuration"] = DateTime.UtcNow.Subtract(orderEntity.CreatedAt).TotalMinutes
+                }
+            };
+
+            // 发布到专门的高价值错误队列
+            await _messagePublisher.PublishAsync(errorEvent, "high-value-errors", cancellationToken);
+
+            _logger.LogWarning("🚨 High-value processing error event published for order {OrderId}, value ${OrderValue:N2}, category: {ErrorCategory}",
+                orderEntity.Id, orderEntity.TotalAmount, errorCategory);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to publish high-value processing error event for order {OrderId}", orderEntity.Id);
+        }
+    }
+
+    private static string GetCustomerTierByOrderValue(decimal orderValue)
+    {
+        return orderValue switch
+        {
+            > 5000m => "Premium",
+            > 2000m => "Gold",
+            > 500m => "Silver",
+            _ => "Standard"
+        };
     }
 
     private static string GetStatusMessage(OrderStatus status)

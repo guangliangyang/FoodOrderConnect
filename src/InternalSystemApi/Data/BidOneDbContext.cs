@@ -1,7 +1,7 @@
+using System.Text.Json;
 using BidOne.InternalSystemApi.Data.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
-using System.Text.Json;
 
 namespace BidOne.InternalSystemApi.Data;
 
@@ -251,7 +251,7 @@ public class BidOneDbContext : DbContext
             },
             new SupplierEntity
             {
-                Id = "SUPP-002", 
+                Id = "SUPP-002",
                 Name = "Quality Meats Ltd",
                 ContactEmail = "supply@qualitymeats.com",
                 ContactPhone = "+1-555-0102",
@@ -280,7 +280,7 @@ public class BidOneDbContext : DbContext
             {
                 Id = "CUST-002",
                 Name = "The Gourmet Kitchen",
-                Email = "purchasing@gourmetkitchen.com", 
+                Email = "purchasing@gourmetkitchen.com",
                 Phone = "+1-555-1002",
                 Address = "321 Culinary Circle, Chef City, CC 22222",
                 IsActive = true,
@@ -351,7 +351,7 @@ public class BidOneDbContext : DbContext
     private async Task AddAuditLogs()
     {
         var auditEntries = new List<AuditLogEntity>();
-        
+
         foreach (var entry in ChangeTracker.Entries())
         {
             if (entry.Entity is AuditLogEntity || entry.State == EntityState.Unchanged)
@@ -372,14 +372,14 @@ public class BidOneDbContext : DbContext
             }
 
             var changes = new Dictionary<string, object>();
-            
+
             foreach (var property in entry.Properties)
             {
                 if (property.IsTemporary)
                     continue;
 
                 var propertyName = property.Metadata.Name;
-                
+
                 switch (entry.State)
                 {
                     case EntityState.Added:
@@ -391,10 +391,10 @@ public class BidOneDbContext : DbContext
                     case EntityState.Modified:
                         if (property.IsModified)
                         {
-                            changes[propertyName] = new 
-                            { 
-                                OldValue = property.OriginalValue, 
-                                NewValue = property.CurrentValue 
+                            changes[propertyName] = new
+                            {
+                                OldValue = property.OriginalValue,
+                                NewValue = property.CurrentValue
                             };
                         }
                         break;

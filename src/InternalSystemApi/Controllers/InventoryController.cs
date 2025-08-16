@@ -1,8 +1,8 @@
+using System.ComponentModel.DataAnnotations;
 using BidOne.InternalSystemApi.Mappings;
 using BidOne.InternalSystemApi.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using System.ComponentModel.DataAnnotations;
 
 namespace BidOne.InternalSystemApi.Controllers;
 

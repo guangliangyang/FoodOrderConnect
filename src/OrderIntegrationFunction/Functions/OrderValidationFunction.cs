@@ -1,21 +1,26 @@
+using System.Text.Json;
 using BidOne.OrderIntegrationFunction.Services;
+using BidOne.Shared.Events;
 using BidOne.Shared.Models;
+using BidOne.Shared.Services;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Extensions.Logging;
-using System.Text.Json;
 
 namespace BidOne.OrderIntegrationFunction.Functions;
 
 public class OrderValidationFunction
 {
     private readonly IOrderValidationService _validationService;
+    private readonly IMessagePublisher _messagePublisher;
     private readonly ILogger<OrderValidationFunction> _logger;
 
     public OrderValidationFunction(
         IOrderValidationService validationService,
+        IMessagePublisher messagePublisher,
         ILogger<OrderValidationFunction> logger)
     {
         _validationService = validationService;
+        _messagePublisher = messagePublisher;
         _logger = logger;
     }
 
@@ -110,6 +115,12 @@ public class OrderValidationFunction
 
             var validationResult = await _validationService.ValidateOrderAsync(order);
 
+            // 🎯 如果验证失败且是高价值错误，发布智能沟通事件
+            if (!validationResult.IsValid && IsHighValueError(order, validationResult))
+            {
+                await PublishHighValueErrorEvent(order, validationResult);
+            }
+
             // Create validation response
             var response = new OrderValidationResponse
             {
@@ -131,6 +142,89 @@ public class OrderValidationFunction
             _logger.LogError(ex, "Error processing order validation from Service Bus");
             throw; // This will move the message to dead letter queue
         }
+    }
+
+    private static bool IsHighValueError(Order order, ValidationResult validationResult)
+    {
+        // 高价值错误条件：订单金额超过 $1000 或客户是重要客户
+        var orderValue = order.Items.Sum(i => i.TotalPrice);
+        var isHighValueOrder = orderValue > 1000m;
+
+        // 检查是否为关键错误类型
+        var criticalErrors = new[] { "CUSTOMER_NOT_FOUND", "PRODUCT_NOT_FOUND", "PRICE_MISMATCH", "ORDER_VALUE_EXCEEDED" };
+        var hasCriticalError = validationResult.Errors.Any(e => criticalErrors.Contains(e.Code));
+
+        return isHighValueOrder || hasCriticalError;
+    }
+
+    private async Task PublishHighValueErrorEvent(Order order, ValidationResult validationResult)
+    {
+        try
+        {
+            var errorEvent = new HighValueErrorEvent
+            {
+                OrderId = order.Id,
+                CustomerId = order.CustomerId,
+                CustomerEmail = order.CustomerEmail ?? "unknown@example.com",
+                ErrorCategory = GetErrorCategory(validationResult.Errors),
+                ErrorMessage = GetPrimaryErrorMessage(validationResult.Errors),
+                TechnicalDetails = JsonSerializer.Serialize(validationResult.Errors),
+                OrderValue = order.Items.Sum(i => i.TotalPrice),
+                CustomerTier = GetCustomerTier(order),
+                ErrorOccurredAt = DateTime.UtcNow,
+                RetryCount = 0,
+                ProcessingStage = "Validation",
+                Source = "OrderValidationFunction",
+                CorrelationId = order.Metadata.GetValueOrDefault("CorrelationId", string.Empty).ToString() ?? string.Empty,
+                ContextData = new Dictionary<string, object>
+                {
+                    ["OrderItemCount"] = order.Items.Count,
+                    ["ValidationErrorCount"] = validationResult.Errors.Count,
+                    ["ValidationDuration"] = validationResult.ValidationData?.GetValueOrDefault("ValidationDuration", 0) ?? 0
+                }
+            };
+
+            // 发布到专门的高价值错误队列
+            await _messagePublisher.PublishAsync(errorEvent, "high-value-errors", CancellationToken.None);
+
+            _logger.LogWarning("🚨 High-value error event published for order {OrderId}, value ${OrderValue:N2}",
+                order.Id, errorEvent.OrderValue);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to publish high-value error event for order {OrderId}", order.Id);
+        }
+    }
+
+    private static string GetErrorCategory(List<ValidationError> errors)
+    {
+        if (errors.Any(e => e.Code.Contains("CUSTOMER")))
+            return "Customer";
+        if (errors.Any(e => e.Code.Contains("PRODUCT")))
+            return "Product";
+        if (errors.Any(e => e.Code.Contains("PRICE")))
+            return "Pricing";
+        if (errors.Any(e => e.Code.Contains("DELIVERY")))
+            return "Delivery";
+        return "General";
+    }
+
+    private static string GetPrimaryErrorMessage(List<ValidationError> errors)
+    {
+        return errors.FirstOrDefault()?.Message ?? "Unknown validation error";
+    }
+
+    private static string GetCustomerTier(Order order)
+    {
+        // 模拟客户等级判断逻辑
+        var orderValue = order.Items.Sum(i => i.TotalPrice);
+        return orderValue switch
+        {
+            > 5000m => "Premium",
+            > 2000m => "Gold",
+            > 500m => "Silver",
+            _ => "Standard"
+        };
     }
 }
 

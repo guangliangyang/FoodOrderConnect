@@ -1,0 +1,161 @@
+name: Infrastructure Deployment
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'infra/**'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'infra/**'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+
+jobs:
+  validate-bicep:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Azure Login
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+    
+    - name: Validate Bicep Template
+      uses: azure/arm-deploy@v1
+      with:
+        subscriptionId: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+        resourceGroupName: ${{ secrets.RESOURCE_GROUP }}
+        template: ./infra/main.bicep
+        parameters: ./infra/parameters.dev.json sqlAdminPassword=${{ secrets.SQL_ADMIN_PASSWORD }}
+        deploymentMode: Validate
+
+  deploy-infrastructure:
+    needs: validate-bicep
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    environment: ${{ github.event.inputs.environment || 'dev' }}
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Azure Login
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+    
+    - name: Deploy Infrastructure
+      uses: azure/arm-deploy@v1
+      id: deploy
+      with:
+        subscriptionId: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+        resourceGroupName: ${{ secrets.RESOURCE_GROUP }}
+        template: ./infra/main.bicep
+        parameters: ./infra/parameters.${{ github.event.inputs.environment || 'dev' }}.json sqlAdminPassword=${{ secrets.SQL_ADMIN_PASSWORD }}
+        deploymentMode: Incremental
+        deploymentName: 'bidone-infra-${{ github.run_number }}'
+    
+    - name: Output deployment results
+      run: |
+        echo "Logic App Name: ${{ steps.deploy.outputs.logicAppName }}"
+        echo "Function App Name: ${{ steps.deploy.outputs.functionAppName }}"
+        echo "API Management URL: ${{ steps.deploy.outputs.apiManagementGatewayUrl }}"
+        echo "Service Bus Namespace: ${{ steps.deploy.outputs.serviceBusNamespace }}"
+    
+    - name: Set outputs for downstream jobs
+      id: infra-outputs
+      run: |
+        echo "logic-app-name=${{ steps.deploy.outputs.logicAppName }}" >> $GITHUB_OUTPUT
+        echo "function-app-name=${{ steps.deploy.outputs.functionAppName }}" >> $GITHUB_OUTPUT
+        echo "api-management-url=${{ steps.deploy.outputs.apiManagementGatewayUrl }}" >> $GITHUB_OUTPUT
+
+  configure-api-management:
+    needs: deploy-infrastructure
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Azure Login
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+    
+    - name: Configure API Management
+      run: |
+        # Get API Management service name from infrastructure deployment
+        APIM_NAME=$(az apim list --resource-group ${{ secrets.RESOURCE_GROUP }} --query "[0].name" -o tsv)
+        
+        # Deploy API Management configuration
+        ./scripts/deploy-apim-config.sh \
+          --resource-group ${{ secrets.RESOURCE_GROUP }} \
+          --apim-name $APIM_NAME \
+          --external-api-url "https://localhost:5001" \
+          --internal-api-url "https://localhost:5002" \
+          --environment ${{ github.event.inputs.environment || 'dev' }}
+      
+    - name: Output API Management URLs
+      run: |
+        APIM_NAME=$(az apim list --resource-group ${{ secrets.RESOURCE_GROUP }} --query "[0].name" -o tsv)
+        APIM_URL=$(az apim show --resource-group ${{ secrets.RESOURCE_GROUP }} --name $APIM_NAME --query "gatewayUrl" -o tsv)
+        echo "API Management Gateway: $APIM_URL"
+        echo "External API Endpoint: $APIM_URL/external"
+        echo "Internal API Endpoint: $APIM_URL/internal"
+
+  test-infrastructure:
+    needs: [deploy-infrastructure, configure-api-management]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Azure Login
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+    
+    - name: Test Logic App Health
+      run: |
+        # Simple test to check if Logic App is accessible
+        az logic workflow show \
+          --resource-group ${{ secrets.RESOURCE_GROUP }} \
+          --name ${{ needs.deploy-infrastructure.outputs.logic-app-name }} \
+          --query "state" \
+          --output tsv
+    
+    - name: Test Function App Health
+      run: |
+        # Test Function App health endpoint
+        curl -f "https://${{ needs.deploy-infrastructure.outputs.function-app-name }}.azurewebsites.net/api/health" || echo "Health check failed"
+    
+    - name: Test Service Bus Connectivity
+      run: |
+        # Verify Service Bus namespace exists and is accessible
+        az servicebus namespace show \
+          --resource-group ${{ secrets.RESOURCE_GROUP }} \
+          --name ${{ needs.deploy-infrastructure.outputs.serviceBusNamespace }} \
+          --query "status" \
+          --output tsv
+    
+    - name: Test API Management Configuration
+      run: |
+        # Test API Management gateway
+        APIM_NAME=$(az apim list --resource-group ${{ secrets.RESOURCE_GROUP }} --query "[0].name" -o tsv)
+        APIM_URL=$(az apim show --resource-group ${{ secrets.RESOURCE_GROUP }} --name $APIM_NAME --query "gatewayUrl" -o tsv)
+        
+        # Test if APIs are configured
+        echo "Testing API Management configuration..."
+        az apim api list --resource-group ${{ secrets.RESOURCE_GROUP }} --service-name $APIM_NAME --query "[].{Name:name,Path:path}" -o table

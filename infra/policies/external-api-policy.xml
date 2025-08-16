@@ -1,0 +1,134 @@
+<!--
+    External Order API Policy
+    Applied to the External Order API
+-->
+<policies>
+    <inbound>
+        <base />
+        
+        <!-- Validate subscription key -->
+        <validate-jwt header-name="Authorization" failed-validation-httpcode="401" failed-validation-error-message="Unauthorized" require-expiration-time="true" require-scheme="Bearer" require-signed-tokens="true">
+            <openid-config url="https://login.microsoftonline.com/common/.well-known/openid_configuration" />
+            <required-claims>
+                <claim name="aud">
+                    <value>api://bidone-external-api</value>
+                </claim>
+            </required-claims>
+        </validate-jwt>
+        
+        <!-- Extract client information -->
+        <set-variable name="clientId" value="@(context.Request.Headers.GetValueOrDefault("X-Client-ID", "unknown"))" />
+        <set-variable name="clientVersion" value="@(context.Request.Headers.GetValueOrDefault("X-Client-Version", "unknown"))" />
+        
+        <!-- Rate limiting per client -->
+        <rate-limit-by-key calls="100" renewal-period="60" counter-key="@(context.Variables["clientId"])" increment-condition="@(context.Request.Method == "POST")" />
+        
+        <!-- Request size limit (1MB) -->
+        <choose>
+            <when condition="@(context.Request.Body.Length > 1048576)">
+                <return-response>
+                    <set-status code="413" reason="Request Entity Too Large" />
+                    <set-body>{"error": {"code": "RequestTooLarge", "message": "Request body size exceeds 1MB limit"}}</set-body>
+                </return-response>
+            </when>
+        </choose>
+        
+        <!-- Content type validation for POST requests -->
+        <choose>
+            <when condition="@(context.Request.Method == "POST")">
+                <choose>
+                    <when condition="@(!context.Request.Headers.GetValueOrDefault("Content-Type", "").StartsWith("application/json"))">
+                        <return-response>
+                            <set-status code="415" reason="Unsupported Media Type" />
+                            <set-body>{"error": {"code": "UnsupportedMediaType", "message": "Content-Type must be application/json"}}</set-body>
+                        </return-response>
+                    </when>
+                </choose>
+            </when>
+        </choose>
+        
+        <!-- Add client info to request headers for backend -->
+        <set-header name="X-APIM-Client-ID" exists-action="override">
+            <value>@(context.Variables["clientId"])</value>
+        </set-header>
+        <set-header name="X-APIM-Client-Version" exists-action="override">
+            <value>@(context.Variables["clientVersion"])</value>
+        </set-header>
+        
+        <!-- Circuit breaker pattern -->
+        <cache-lookup-value key="external-api-circuit-breaker" variable-name="circuitBreakerState" />
+        <choose>
+            <when condition="@(context.Variables.GetValueOrDefault("circuitBreakerState", "closed") == "open")">
+                <return-response>
+                    <set-status code="503" reason="Service Temporarily Unavailable" />
+                    <set-header name="Retry-After" exists-action="override">
+                        <value>60</value>
+                    </set-header>
+                    <set-body>{"error": {"code": "ServiceUnavailable", "message": "Service is temporarily unavailable. Please try again later."}}</set-body>
+                </return-response>
+            </when>
+        </choose>
+    </inbound>
+    <backend>
+        <!-- Add retry policy with exponential backoff -->
+        <retry condition="@(context.Response.StatusCode >= 500)" count="3" interval="2" max-interval="10" delta="2">
+            <forward-request buffer-request-body="true" />
+        </retry>
+    </backend>
+    <outbound>
+        <base />
+        
+        <!-- Handle circuit breaker state -->
+        <choose>
+            <when condition="@(context.Response.StatusCode >= 500)">
+                <!-- Increment failure counter -->
+                <cache-lookup-value key="external-api-failures" variable-name="failureCount" />
+                <set-variable name="newFailureCount" value="@(int.Parse(context.Variables.GetValueOrDefault("failureCount", "0").ToString()) + 1)" />
+                <cache-store-value key="external-api-failures" value="@(context.Variables["newFailureCount"])" duration="300" />
+                
+                <!-- Open circuit breaker if failure threshold exceeded -->
+                <choose>
+                    <when condition="@(int.Parse(context.Variables["newFailureCount"].ToString()) >= 5)">
+                        <cache-store-value key="external-api-circuit-breaker" value="open" duration="60" />
+                    </when>
+                </choose>
+            </when>
+            <otherwise>
+                <!-- Reset failure counter on success -->
+                <cache-remove-value key="external-api-failures" />
+                <cache-remove-value key="external-api-circuit-breaker" />
+            </otherwise>
+        </choose>
+        
+        <!-- Remove internal headers -->
+        <set-header name="X-Powered-By" exists-action="delete" />
+        <set-header name="X-AspNet-Version" exists-action="delete" />
+        
+        <!-- Add API version info -->
+        <set-header name="X-API-Version" exists-action="override">
+            <value>v1</value>
+        </set-header>
+    </outbound>
+    <on-error>
+        <base />
+        
+        <!-- Custom error handling for external API -->
+        <choose>
+            <when condition="@(context.LastError.Reason == "Unauthorized")">
+                <return-response>
+                    <set-status code="401" reason="Unauthorized" />
+                    <set-header name="WWW-Authenticate" exists-action="override">
+                        <value>Bearer realm="BidOne API"</value>
+                    </set-header>
+                    <set-body>{"error": {"code": "Unauthorized", "message": "Valid authentication required"}}</set-body>
+                </return-response>
+            </when>
+            <when condition="@(context.LastError.Reason == "Forbidden")">
+                <return-response>
+                    <set-status code="403" reason="Forbidden" />
+                    <set-body>{"error": {"code": "Forbidden", "message": "Access denied"}}</set-body>
+                </return-response>
+            </when>
+        </choose>
+    </on-error>
+</policies>

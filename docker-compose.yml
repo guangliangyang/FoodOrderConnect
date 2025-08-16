@@ -16,11 +16,11 @@ services:
     networks:
       - bidone-network
     healthcheck:
-      test: ["CMD-SHELL", "/opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P BidOne123! -Q 'SELECT 1' || exit 1"]
-      interval: 10s
-      timeout: 3s
-      retries: 10
-      start_period: 10s
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P BidOne123! -Q 'SELECT 1' -C -N"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
 
   # Cosmos DB Emulator
   cosmosdb:
@@ -40,11 +40,11 @@ services:
     networks:
       - bidone-network
     healthcheck:
-      test: ["CMD", "curl", "-f", "https://localhost:8081/_explorer/emulator.pem"]
-      interval: 30s
-      timeout: 10s
-      retries: 10
-      start_period: 60s
+      test: ["CMD", "curl", "-k", "-f", "https://localhost:8081/_explorer/emulator.pem"]
+      interval: 60s
+      timeout: 30s
+      retries: 3
+      start_period: 120s
 
   # Redis for caching
   redis:
@@ -62,6 +62,7 @@ services:
       timeout: 3s
       retries: 5
 
+
   # Azure Service Bus emulator (using Azure Service Bus emulator image)
   servicebus:
     image: mcr.microsoft.com/azure-messaging/servicebus-emulator:latest
@@ -78,12 +79,7 @@ services:
       - bidone-network
     depends_on:
       - sqlserver
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5672"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 30s
+    # Service Bus emulator doesn't need healthcheck for demo purposes
 
   # Application Insights local emulator (using OpenTelemetry collector)
   otel-collector:

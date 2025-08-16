@@ -44,8 +44,17 @@ param apimServiceName string = 'bidone-apim-${environmentName}-${uniqueSuffix}'
 @description('Function App name')
 param functionAppName string = 'bidone-func-${environmentName}-${uniqueSuffix}'
 
+@description('Customer Communication Function App name')
+param customerCommFunctionAppName string = 'bidone-custcomm-${environmentName}-${uniqueSuffix}'
+
 @description('Storage account name for Function App')
 param storageAccountName string = 'bidonest${environmentName}${uniqueSuffix}'
+
+@description('Logic App name')
+param logicAppName string = 'bidone-logic-${environmentName}-${uniqueSuffix}'
+
+@description('Event Grid topic name')
+param eventGridTopicName string = 'bidone-events-${environmentName}-${uniqueSuffix}'
 
 // Variables for resource configuration
 var tags = {
@@ -60,6 +69,13 @@ var serviceBusQueueNames = [
   'order-enriched' 
   'order-confirmed'
   'order-failed'
+  'high-value-errors'
+]
+
+var eventGridEventTypes = [
+  'BidOne.Dashboard.OrderMetrics'
+  'BidOne.Dashboard.PerformanceAlert'
+  'BidOne.Dashboard.SystemHealth'
 ]
 
 var cosmosDbContainers = [
@@ -320,6 +336,37 @@ resource redisCache 'Microsoft.Cache/redis@2023-04-01' = {
   }
 }
 
+// Event Grid Topic
+resource eventGridTopic 'Microsoft.EventGrid/topics@2023-12-15-preview' = {
+  name: eventGridTopicName
+  location: location
+  tags: tags
+  properties: {
+    inputSchema: 'EventGridSchema'
+    publicNetworkAccess: 'Enabled'
+    dataResidencyBoundary: 'WithinGeopair'
+    eventTypeInfo: {
+      kind: 'inline'
+      inlineEventTypes: {
+        'BidOne.Dashboard.OrderMetrics': {
+          description: 'Triggered when order metrics need to be updated on dashboard'
+          displayName: 'Dashboard Order Metrics'
+          documentationUrl: 'https://docs.bidone.com/events/dashboard-metrics'
+          dataSchemaUrl: 'https://docs.bidone.com/schemas/dashboard-metrics.json'
+        }
+        'BidOne.Dashboard.PerformanceAlert': {
+          description: 'Triggered when system performance alerts need to be displayed'
+          displayName: 'Dashboard Performance Alert'
+        }
+        'BidOne.Dashboard.SystemHealth': {
+          description: 'Triggered when system health status changes'
+          displayName: 'Dashboard System Health'
+        }
+      }
+    }
+  }
+}
+
 // Storage Account for Function App
 resource storageAccount 'Microsoft.Storage/storageAccounts@2023-01-01' = {
   name: storageAccountName
@@ -398,6 +445,14 @@ resource functionApp 'Microsoft.Web/sites@2022-09-01' = {
           name: 'CosmosDbConnectionString'
           value: cosmosDbAccount.listConnectionStrings().connectionStrings[0].connectionString
         }
+        {
+          name: 'EventGridTopicEndpoint'
+          value: eventGridTopic.properties.endpoint
+        }
+        {
+          name: 'EventGridTopicKey'
+          value: eventGridTopic.listKeys().key1
+        }
       ]
       netFrameworkVersion: 'v8.0'
       use32BitWorkerProcess: false
@@ -412,6 +467,7 @@ resource functionApp 'Microsoft.Web/sites@2022-09-01' = {
     serviceBusNamespace
     sqlDatabase
     cosmosDbAccount
+    eventGridTopic
   ]
 }
 
@@ -471,6 +527,111 @@ resource apiManagementService 'Microsoft.ApiManagement/service@2023-05-01-previe
   }
 }
 
+// Logic App (Standard)
+resource logicApp 'Microsoft.Logic/workflows@2019-05-01' = {
+  name: logicAppName
+  location: location
+  tags: tags
+  properties: {
+    definition: json(loadTextContent('logic-app-definition.json'))
+    parameters: {
+      serviceBusConnectionString: {
+        value: listKeys(resourceId('Microsoft.ServiceBus/namespaces/authorizationRules', serviceBusNamespace.name, 'RootManageSharedAccessKey'), '2022-10-01-preview').primaryConnectionString
+      }
+      functionAppUrl: {
+        value: 'https://${functionApp.properties.defaultHostName}'
+      }
+      functionAppCode: {
+        value: functionApp.listKeys().functionKeys.default
+      }
+      internalApiUrl: {
+        value: 'https://${apiManagementService.properties.gatewayUrl}/internal'
+      }
+    }
+    state: 'Enabled'
+  }
+  dependsOn: [
+    functionApp
+    serviceBusNamespace
+    apiManagementService
+    keyVault
+  ]
+}
+
+// Event Grid Subscriptions - Dashboard focused
+resource dashboardEventSubscription 'Microsoft.EventGrid/topics/eventSubscriptions@2023-12-15-preview' = {
+  parent: eventGridTopic
+  name: 'dashboard-events-to-functions'
+  properties: {
+    destination: {
+      endpointType: 'AzureFunction'
+      properties: {
+        resourceId: '${functionApp.id}/functions/DashboardMetricsProcessor'
+        maxEventsPerBatch: 20
+        preferredBatchSizeInKilobytes: 128
+      }
+    }
+    filter: {
+      includedEventTypes: [
+        'BidOne.Dashboard.OrderMetrics'
+        'BidOne.Dashboard.PerformanceAlert'
+        'BidOne.Dashboard.SystemHealth'
+      ]
+    }
+    retryPolicy: {
+      maxDeliveryAttempts: 3
+      eventTimeToLiveInMinutes: 60
+    }
+    deadLetterDestination: {
+      endpointType: 'StorageBlob'
+      properties: {
+        resourceId: storageAccount.id
+        blobContainerName: 'dashboard-deadletter'
+      }
+    }
+  }
+}
+
+// Service Bus System Topic for Event Grid integration
+resource serviceBusSystemTopic 'Microsoft.EventGrid/systemTopics@2023-12-15-preview' = {
+  name: 'servicebus-system-topic-${uniqueSuffix}'
+  location: location
+  tags: resourceTags
+  properties: {
+    source: serviceBusNamespace.id
+    topicType: 'Microsoft.ServiceBus.Namespaces'
+  }
+}
+
+// Event Grid Subscription for high-value errors
+resource highValueErrorSubscription 'Microsoft.EventGrid/systemTopics/eventSubscriptions@2023-12-15-preview' = {
+  parent: serviceBusSystemTopic
+  name: 'high-value-error-subscription'
+  properties: {
+    destination: {
+      endpointType: 'WebHook'
+      properties: {
+        endpointUrl: 'https://${customerCommFunctionAppName}.azurewebsites.net/runtime/webhooks/eventgrid?functionName=CustomerCommunicationProcessor&code={FUNCTION_KEY}'
+        maxEventsPerBatch: 1
+        preferredBatchSizeInKilobytes: 64
+      }
+    }
+    filter: {
+      subjectBeginsWith: '/queues/high-value-errors'
+      includedEventTypes: [
+        'Microsoft.ServiceBus.ActiveMessagesAvailableWithNoListeners'
+      ]
+    }
+    retryPolicy: {
+      maxDeliveryAttempts: 3
+      eventTimeToLiveInMinutes: 60
+    }
+  }
+}
+
+// Note: Logic App connections are typically created through Azure portal or ARM templates
+// For this demo, we'll use direct HTTP calls with authentication parameters
+
 // Store secrets in Key Vault
 resource serviceBusConnectionSecret 'Microsoft.KeyVault/vaults/secrets@2023-02-01' = {
   parent: keyVault
@@ -512,6 +673,22 @@ resource redisConnectionSecret 'Microsoft.KeyVault/vaults/secrets@2023-02-01' = 
   }
 }
 
+resource eventGridTopicKeySecret 'Microsoft.KeyVault/vaults/secrets@2023-02-01' = {
+  parent: keyVault
+  name: 'EventGridTopicKey'
+  properties: {
+    value: eventGridTopic.listKeys().key1
+  }
+}
+
+resource eventGridTopicEndpointSecret 'Microsoft.KeyVault/vaults/secrets@2023-02-01' = {
+  parent: keyVault
+  name: 'EventGridTopicEndpoint'
+  properties: {
+    value: eventGridTopic.properties.endpoint
+  }
+}
+
 // Outputs
 output resourceGroupName string = resourceGroup().name
 output serviceBusNamespace string = serviceBusNamespace.name
@@ -534,3 +711,7 @@ output functionAppName string = functionApp.name
 output functionAppUrl string = 'https://${functionApp.properties.defaultHostName}'
 output redisCacheName string = redisCache.name
 output redisHostName string = redisCache.properties.hostName
+output logicAppName string = logicApp.name
+output logicAppId string = logicApp.id
+output eventGridTopicName string = eventGridTopic.name
+output eventGridTopicEndpoint string = eventGridTopic.properties.endpoint

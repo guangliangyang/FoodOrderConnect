@@ -1,0 +1,95 @@
+<!--
+    Internal System API Policy
+    Applied to the Internal System API (used by Logic Apps)
+-->
+<policies>
+    <inbound>
+        <base />
+        
+        <!-- IP whitelist for internal services -->
+        <ip-filter action="allow">
+            <!-- Azure Logic Apps IP ranges (example - update with actual ranges) -->
+            <address-range from="13.65.0.0" to="13.65.255.255" />
+            <address-range from="40.64.0.0" to="40.127.255.255" />
+            <!-- Azure Container Apps IP ranges -->
+            <address-range from="20.0.0.0" to="20.255.255.255" />
+            <!-- Local development -->
+            <address>127.0.0.1</address>
+            <address-range from="172.16.0.0" to="172.31.255.255" />
+        </ip-filter>
+        
+        <!-- Validate required headers for internal requests -->
+        <choose>
+            <when condition="@(!context.Request.Headers.ContainsKey("X-Internal-Service"))">
+                <return-response>
+                    <set-status code="400" reason="Bad Request" />
+                    <set-body>{"error": {"code": "MissingHeader", "message": "X-Internal-Service header is required"}}</set-body>
+                </return-response>
+            </when>
+        </choose>
+        
+        <!-- Extract internal service information -->
+        <set-variable name="internalService" value="@(context.Request.Headers.GetValueOrDefault("X-Internal-Service", "unknown"))" />
+        <set-variable name="workflowId" value="@(context.Request.Headers.GetValueOrDefault("X-Workflow-ID", "unknown"))" />
+        
+        <!-- Rate limiting for internal services (more generous) -->
+        <rate-limit-by-key calls="1000" renewal-period="60" counter-key="@(context.Variables["internalService"])" />
+        
+        <!-- Add internal service context -->
+        <set-header name="X-APIM-Internal-Service" exists-action="override">
+            <value>@(context.Variables["internalService"])</value>
+        </set-header>
+        <set-header name="X-APIM-Workflow-ID" exists-action="override">
+            <value>@(context.Variables["workflowId"])</value>
+        </set-header>
+        
+        <!-- No authentication required for internal APIs (IP-based security) -->
+    </inbound>
+    <backend>
+        <!-- Simple retry for internal calls -->
+        <retry condition="@(context.Response.StatusCode >= 500)" count="2" interval="1">
+            <forward-request buffer-request-body="true" />
+        </retry>
+    </backend>
+    <outbound>
+        <base />
+        
+        <!-- Add internal API specific headers -->
+        <set-header name="X-Internal-API" exists-action="override">
+            <value>true</value>
+        </set-header>
+        
+        <!-- Remove external-facing headers -->
+        <set-header name="Server" exists-action="delete" />
+        <set-header name="X-Powered-By" exists-action="delete" />
+        <set-header name="X-AspNet-Version" exists-action="delete" />
+        
+        <!-- Performance metrics for internal monitoring -->
+        <set-header name="X-Processing-Time" exists-action="override">
+            <value>@(DateTime.UtcNow.Subtract((DateTime)context.Variables["RequestStartTime"]).TotalMilliseconds.ToString())</value>
+        </set-header>
+    </outbound>
+    <on-error>
+        <base />
+        
+        <!-- Simplified error handling for internal APIs -->
+        <return-response>
+            <set-status code="500" reason="Internal Server Error" />
+            <set-header name="Content-Type" exists-action="override">
+                <value>application/json</value>
+            </set-header>
+            <set-body>@{
+                return new JObject(
+                    new JProperty("error", new JObject(
+                        new JProperty("code", "InternalApiError"),
+                        new JProperty("message", "Internal API processing failed"),
+                        new JProperty("service", context.Variables.GetValueOrDefault("internalService", "unknown")),
+                        new JProperty("workflowId", context.Variables.GetValueOrDefault("workflowId", "unknown")),
+                        new JProperty("correlationId", context.Variables.GetValueOrDefault("correlationId", Guid.NewGuid().ToString())),
+                        new JProperty("timestamp", DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"))
+                    ))
+                ).ToString();
+            }</set-body>
+        </return-response>
+    </on-error>
+</policies>

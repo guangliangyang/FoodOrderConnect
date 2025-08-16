@@ -58,10 +58,10 @@ public class OrderEnrichmentService : IOrderEnrichmentService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error during order enrichment for order {OrderId}", order.Id);
-            
+
             result.IsSuccessful = false;
             result.Warnings.Add($"Enrichment failed: {ex.Message}");
-            
+
             return result;
         }
     }
@@ -77,7 +77,7 @@ public class OrderEnrichmentService : IOrderEnrichmentService
             {
                 result.EnrichedOrder.CustomerEmail = customerData.Email;
                 result.EnrichedOrder.CustomerPhone = customerData.Phone;
-                
+
                 result.EnrichmentData["CustomerName"] = customerData.Name;
                 result.EnrichmentData["CustomerTier"] = customerData.CustomerTier;
                 result.EnrichmentData["CreditLimit"] = customerData.CreditLimit;
@@ -119,7 +119,7 @@ public class OrderEnrichmentService : IOrderEnrichmentService
                     // Enrich product information
                     item.ProductName = productData.Name;
                     item.Category = productData.Category;
-                    
+
                     // Add enrichment data
                     result.EnrichmentData[$"Product_{item.ProductId}_Description"] = productData.Description;
                     result.EnrichmentData[$"Product_{item.ProductId}_Weight"] = productData.Weight;
@@ -160,7 +160,7 @@ public class OrderEnrichmentService : IOrderEnrichmentService
     {
         try
         {
-            if (!string.IsNullOrWhiteSpace(result.EnrichedOrder.DeliveryAddress) && 
+            if (!string.IsNullOrWhiteSpace(result.EnrichedOrder.DeliveryAddress) &&
                 result.EnrichedOrder.DeliveryDate.HasValue)
             {
                 var deliveryData = await _externalDataService.GetDeliveryDataAsync(
@@ -205,7 +205,7 @@ public class OrderEnrichmentService : IOrderEnrichmentService
     private static void CalculateEnrichedTotals(EnrichmentResult result)
     {
         var order = result.EnrichedOrder;
-        
+
         // Calculate totals
         var subtotal = order.Items.Sum(i => i.TotalPrice);
         var totalWeight = 0m;
@@ -238,10 +238,10 @@ public class OrderEnrichmentService : IOrderEnrichmentService
     private static List<string> GetEnrichedFieldsList(EnrichmentResult result)
     {
         var enrichedFields = new List<string>();
-        
+
         if (!string.IsNullOrEmpty(result.EnrichedOrder.CustomerEmail))
             enrichedFields.Add("CustomerEmail");
-        
+
         if (!string.IsNullOrEmpty(result.EnrichedOrder.CustomerPhone))
             enrichedFields.Add("CustomerPhone");
 
@@ -249,7 +249,7 @@ public class OrderEnrichmentService : IOrderEnrichmentService
         {
             if (!string.IsNullOrEmpty(item.ProductName))
                 enrichedFields.Add($"Product_{item.ProductId}_Name");
-            
+
             if (!string.IsNullOrEmpty(item.Category))
                 enrichedFields.Add($"Product_{item.ProductId}_Category");
         }

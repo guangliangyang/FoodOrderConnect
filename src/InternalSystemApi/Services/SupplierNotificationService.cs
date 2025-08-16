@@ -1,7 +1,7 @@
-using BidOne.InternalSystemApi.Data.Entities;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using BidOne.InternalSystemApi.Data.Entities;
 
 namespace BidOne.InternalSystemApi.Services;
 
@@ -51,22 +51,22 @@ public class SupplierNotificationService : ISupplierNotificationService
             });
 
             var content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
-            
+
             // Add authentication headers if needed
             _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "supplier-api-token");
-            
+
             var response = await _httpClient.PostAsync($"{supplier.ApiEndpoint}/orders", content, cancellationToken);
 
             if (response.IsSuccessStatusCode)
             {
-                _logger.LogInformation("Successfully notified supplier {SupplierId} about order {OrderId}", 
+                _logger.LogInformation("Successfully notified supplier {SupplierId} about order {OrderId}",
                     supplier.Id, order.Id);
                 return true;
             }
             else
             {
                 var responseContent = await response.Content.ReadAsStringAsync(cancellationToken);
-                _logger.LogWarning("Failed to notify supplier {SupplierId} about order {OrderId}. Status: {StatusCode}, Response: {Response}", 
+                _logger.LogWarning("Failed to notify supplier {SupplierId} about order {OrderId}. Status: {StatusCode}, Response: {Response}",
                     supplier.Id, order.Id, response.StatusCode, responseContent);
                 return false;
             }
@@ -103,21 +103,21 @@ public class SupplierNotificationService : ISupplierNotificationService
             });
 
             var content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
-            
+
             _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "supplier-api-token");
-            
+
             var response = await _httpClient.PutAsync($"{supplier.ApiEndpoint}/orders/{order.Id}", content, cancellationToken);
 
             if (response.IsSuccessStatusCode)
             {
-                _logger.LogInformation("Successfully notified supplier {SupplierId} about order {OrderId} update: {UpdateType}", 
+                _logger.LogInformation("Successfully notified supplier {SupplierId} about order {OrderId} update: {UpdateType}",
                     supplier.Id, order.Id, updateType);
                 return true;
             }
             else
             {
                 var responseContent = await response.Content.ReadAsStringAsync(cancellationToken);
-                _logger.LogWarning("Failed to notify supplier {SupplierId} about order {OrderId} update. Status: {StatusCode}, Response: {Response}", 
+                _logger.LogWarning("Failed to notify supplier {SupplierId} about order {OrderId} update. Status: {StatusCode}, Response: {Response}",
                     supplier.Id, order.Id, response.StatusCode, responseContent);
                 return false;
             }
@@ -152,21 +152,21 @@ public class SupplierNotificationService : ISupplierNotificationService
             });
 
             var content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
-            
+
             _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "supplier-api-token");
-            
+
             var response = await _httpClient.DeleteAsync($"{supplier.ApiEndpoint}/orders/{orderId}", cancellationToken);
 
             if (response.IsSuccessStatusCode)
             {
-                _logger.LogInformation("Successfully notified supplier {SupplierId} about order {OrderId} cancellation", 
+                _logger.LogInformation("Successfully notified supplier {SupplierId} about order {OrderId} cancellation",
                     supplier.Id, orderId);
                 return true;
             }
             else
             {
                 var responseContent = await response.Content.ReadAsStringAsync(cancellationToken);
-                _logger.LogWarning("Failed to notify supplier {SupplierId} about order {OrderId} cancellation. Status: {StatusCode}, Response: {Response}", 
+                _logger.LogWarning("Failed to notify supplier {SupplierId} about order {OrderId} cancellation. Status: {StatusCode}, Response: {Response}",
                     supplier.Id, orderId, response.StatusCode, responseContent);
                 return false;
             }

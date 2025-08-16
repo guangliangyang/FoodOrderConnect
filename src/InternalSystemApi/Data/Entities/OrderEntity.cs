@@ -1,5 +1,5 @@
-using BidOne.Shared.Models;
 using System.ComponentModel.DataAnnotations;
+using BidOne.Shared.Models;
 
 namespace BidOne.InternalSystemApi.Data.Entities;
 

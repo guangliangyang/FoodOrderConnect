@@ -1,9 +1,9 @@
+using System.Net;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Http;
 using Microsoft.Extensions.Logging;
 using Polly;
 using Polly.Extensions.Http;
-using Microsoft.Extensions.Http;
-using System.Net;
 
 namespace BidOne.Common.Extensions;
 

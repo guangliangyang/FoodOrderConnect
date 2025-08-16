@@ -1,11 +1,14 @@
+using System.Text.Json;
+using Azure.Messaging.ServiceBus;
 using BidOne.ExternalOrderApi.Services;
 using BidOne.ExternalOrderApi.Validators;
+using BidOne.Shared.Metrics;
 using BidOne.Shared.Services;
 using FluentValidation;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Caching.Distributed;
+using Prometheus;
 using Serilog;
-using System.Text.Json;
-using Azure.Messaging.ServiceBus;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -30,9 +33,9 @@ builder.Services.AddControllers()
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {
-    c.SwaggerDoc("v1", new() 
-    { 
-        Title = "BidOne External Order API", 
+    c.SwaggerDoc("v1", new()
+    {
+        Title = "BidOne External Order API",
         Version = "v1",
         Description = "API for receiving external orders from suppliers and partners"
     });
@@ -48,7 +51,7 @@ builder.Services.AddApplicationInsightsTelemetry(builder.Configuration);
 var serviceBusConnectionString = builder.Configuration.GetConnectionString("ServiceBus");
 if (!string.IsNullOrEmpty(serviceBusConnectionString))
 {
-    builder.Services.AddSingleton<ServiceBusClient>(provider => 
+    builder.Services.AddSingleton<ServiceBusClient>(provider =>
         new ServiceBusClient(serviceBusConnectionString));
     builder.Services.AddScoped<IMessagePublisher, ServiceBusMessagePublisher>();
 }
@@ -58,22 +61,40 @@ else
     builder.Services.AddScoped<IMessagePublisher, ConsoleMessagePublisher>();
 }
 
-// Add Redis Cache
-builder.Services.AddStackExchangeRedisCache(options =>
+// Add Redis Cache (optional)
+var redisConnectionString = builder.Configuration.GetConnectionString("Redis");
+if (!string.IsNullOrEmpty(redisConnectionString))
 {
-    options.Configuration = builder.Configuration.GetConnectionString("Redis");
-});
+    builder.Services.AddStackExchangeRedisCache(options =>
+    {
+        options.Configuration = redisConnectionString;
+    });
+}
+else
+{
+    // Use in-memory distributed cache as fallback for development
+    builder.Services.AddDistributedMemoryCache();
+}
 
 // Add custom services
-builder.Services.AddScoped<IMessagePublisher, ServiceBusMessagePublisher>();
 builder.Services.AddScoped<IOrderService, OrderService>();
+
+// Add Dashboard Event Publisher
+builder.Services.AddScoped<IDashboardEventPublisher, DashboardEventPublisher>();
+
+// 📊 Add Prometheus metrics (演示监控能力)
+builder.Services.AddSingleton<MetricServer>(provider =>
+{
+    var metricServer = new MetricServer(hostname: "*", port: 9090);
+    metricServer.Start();
+    return metricServer;
+});
 
 // Add health checks
 var healthChecksBuilder = builder.Services.AddHealthChecks()
     .AddCheck("self", () => Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckResult.Healthy());
 
 // Add Redis health check if connection string is provided
-var redisConnectionString = builder.Configuration.GetConnectionString("Redis");
 if (!string.IsNullOrEmpty(redisConnectionString))
 {
     healthChecksBuilder.AddRedis(redisConnectionString, name: "redis");
@@ -114,6 +135,11 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 app.UseCors("AllowAll");
+
+// 📊 Enable Prometheus metrics endpoint (/metrics)
+app.UseMetricServer();
+app.UseHttpMetrics(); // 自动收集 HTTP 请求指标
+
 app.UseAuthorization();
 
 // Add request logging

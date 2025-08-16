@@ -1,7 +1,7 @@
+using System.Text.Json;
 using Azure.Messaging.ServiceBus;
 using BidOne.Shared.Events;
 using BidOne.Shared.Services;
-using System.Text.Json;
 
 namespace BidOne.InternalSystemApi.Services;
 
@@ -108,7 +108,7 @@ public class ServiceBusMessagePublisher : IMessagePublisher, IDisposable
                     // If we can't add the message to the current batch, send the current batch
                     // and create a new one for the remaining messages
                     await sender.SendMessagesAsync(messageBatch, cancellationToken);
-                    
+
                     using var newBatch = await sender.CreateMessageBatchAsync(cancellationToken);
                     if (!newBatch.TryAddMessage(serviceBusMessage))
                     {
@@ -167,7 +167,7 @@ public class ServiceBusMessagePublisher : IMessagePublisher, IDisposable
         return eventType.Name switch
         {
             nameof(OrderReceivedEvent) => "order-received",
-            nameof(OrderValidatedEvent) => "order-validated", 
+            nameof(OrderValidatedEvent) => "order-validated",
             nameof(OrderEnrichedEvent) => "order-enriched",
             nameof(OrderConfirmedEvent) => "order-confirmed",
             nameof(OrderFailedEvent) => "order-failed",

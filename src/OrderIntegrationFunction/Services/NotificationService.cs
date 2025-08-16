@@ -1,7 +1,7 @@
+using System.Text.Json;
 using BidOne.Shared.Models;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
-using System.Text.Json;
 
 namespace BidOne.OrderIntegrationFunction.Services;
 
@@ -42,14 +42,14 @@ public class NotificationService : INotificationService
             };
 
             var result = await SendNotificationAsync(template, "OrderConfirmation", cancellationToken);
-            
+
             if (result.IsSuccessful)
             {
                 _logger.LogInformation("Order confirmation sent successfully for order {OrderId}", order.Id);
             }
             else
             {
-                _logger.LogWarning("Failed to send order confirmation for order {OrderId}: {Error}", 
+                _logger.LogWarning("Failed to send order confirmation for order {OrderId}: {Error}",
                     order.Id, result.ErrorMessage);
             }
 
@@ -83,14 +83,14 @@ public class NotificationService : INotificationService
             };
 
             var result = await SendNotificationAsync(template, "OrderUpdate", cancellationToken);
-            
+
             if (result.IsSuccessful)
             {
                 _logger.LogInformation("Order update sent successfully for order {OrderId}", order.Id);
             }
             else
             {
-                _logger.LogWarning("Failed to send order update for order {OrderId}: {Error}", 
+                _logger.LogWarning("Failed to send order update for order {OrderId}: {Error}",
                     order.Id, result.ErrorMessage);
             }
 
@@ -126,14 +126,14 @@ public class NotificationService : INotificationService
             };
 
             var result = await SendNotificationAsync(template, "SupplierNotification", cancellationToken);
-            
+
             if (result.IsSuccessful)
             {
                 _logger.LogInformation("Supplier notification sent successfully for order {OrderId}", order.Id);
             }
             else
             {
-                _logger.LogWarning("Failed to send supplier notification for order {OrderId}: {Error}", 
+                _logger.LogWarning("Failed to send supplier notification for order {OrderId}: {Error}",
                     order.Id, result.ErrorMessage);
             }
 
@@ -167,14 +167,14 @@ public class NotificationService : INotificationService
             };
 
             var result = await SendNotificationAsync(template, "DeliveryNotification", cancellationToken);
-            
+
             if (result.IsSuccessful)
             {
                 _logger.LogInformation("Delivery notification sent successfully for order {OrderId}", order.Id);
             }
             else
             {
-                _logger.LogWarning("Failed to send delivery notification for order {OrderId}: {Error}", 
+                _logger.LogWarning("Failed to send delivery notification for order {OrderId}: {Error}",
                     order.Id, result.ErrorMessage);
             }
 
@@ -207,7 +207,7 @@ public class NotificationService : INotificationService
             };
 
             var result = await SendNotificationAsync(template, "ErrorNotification", cancellationToken);
-            
+
             if (result.IsSuccessful)
             {
                 _logger.LogInformation("Error notification sent successfully");
@@ -231,7 +231,7 @@ public class NotificationService : INotificationService
         try
         {
             var emailServiceUrl = _configuration["ExternalServices:EmailServiceUrl"];
-            
+
             if (string.IsNullOrEmpty(emailServiceUrl))
             {
                 _logger.LogWarning("Email service URL not configured. Simulating email send.");
@@ -253,12 +253,12 @@ public class NotificationService : INotificationService
             });
 
             var content = new StringContent(jsonContent, System.Text.Encoding.UTF8, "application/json");
-            
+
             // Add authorization header if configured
             var apiKey = _configuration["ExternalServices:EmailServiceApiKey"];
             if (!string.IsNullOrEmpty(apiKey))
             {
-                _httpClient.DefaultRequestHeaders.Authorization = 
+                _httpClient.DefaultRequestHeaders.Authorization =
                     new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
             }
 
@@ -315,7 +315,7 @@ public class NotificationService : INotificationService
         _logger.LogInformation("To: {Email}", template.RecipientEmail);
         _logger.LogInformation("Subject: {Subject}", template.Subject);
         _logger.LogInformation("Template Type: {TemplateType}", templateType);
-        _logger.LogInformation("Body Preview: {BodyPreview}", 
+        _logger.LogInformation("Body Preview: {BodyPreview}",
             template.Body.Length > 100 ? template.Body[..100] + "..." : template.Body);
 
         return new NotificationResult
@@ -330,7 +330,7 @@ public class NotificationService : INotificationService
     private static string BuildOrderConfirmationBody(Order order)
     {
         var totalAmount = order.Items.Sum(i => i.TotalPrice);
-        var itemList = string.Join("\n", order.Items.Select(item => 
+        var itemList = string.Join("\n", order.Items.Select(item =>
             $"- {item.ProductName} (Qty: {item.Quantity}) - ${item.TotalPrice:N2}"));
 
         return $@"Dear Customer,
@@ -375,7 +375,7 @@ BidOne Team";
     private static string BuildSupplierNotificationBody(Order order)
     {
         var totalAmount = order.Items.Sum(i => i.TotalPrice);
-        var itemList = string.Join("\n", order.Items.Select(item => 
+        var itemList = string.Join("\n", order.Items.Select(item =>
             $"- Product ID: {item.ProductId}, Name: {item.ProductName}, Qty: {item.Quantity}, Unit Price: ${item.UnitPrice:N2}"));
 
         return $@"New Order Received
@@ -419,7 +419,7 @@ BidOne Team";
 
     private static string BuildErrorNotificationBody(string errorMessage, Dictionary<string, object>? context)
     {
-        var contextInfo = context != null && context.Any() 
+        var contextInfo = context != null && context.Any()
             ? "\n\nContext Information:\n" + string.Join("\n", context.Select(kvp => $"- {kvp.Key}: {kvp.Value}"))
             : "";
 

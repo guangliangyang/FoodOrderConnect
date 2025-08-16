@@ -17,7 +17,7 @@ echo "✅ Redis is ready"
 
 # Wait for SQL Server
 echo "Waiting for SQL Server..."
-until docker exec bidone-sql-dev /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P BidOne123! -Q "SELECT 1" > /dev/null 2>&1; do
+until docker exec bidone-sql-dev /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P BidOne123! -Q "SELECT 1"  -C > /dev/null 2>&1; do
     sleep 5
 done
 echo "✅ SQL Server is ready"

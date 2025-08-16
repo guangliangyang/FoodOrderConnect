@@ -43,6 +43,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "InternalSystemApi", "src\In
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OrderIntegrationFunction", "src\OrderIntegrationFunction\OrderIntegrationFunction.csproj", "{44444444-4444-4444-4444-444444444444}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CustomerCommunicationFunction", "src\CustomerCommunicationFunction\CustomerCommunicationFunction.csproj", "{55555555-5555-5555-5555-555555555555}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -101,6 +103,18 @@ Global
 		{44444444-4444-4444-4444-444444444444}.Release|x64.Build.0 = Release|Any CPU
 		{44444444-4444-4444-4444-444444444444}.Release|x86.ActiveCfg = Release|Any CPU
 		{44444444-4444-4444-4444-444444444444}.Release|x86.Build.0 = Release|Any CPU
+		{55555555-5555-5555-5555-555555555555}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{55555555-5555-5555-5555-555555555555}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{55555555-5555-5555-5555-555555555555}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{55555555-5555-5555-5555-555555555555}.Debug|x64.Build.0 = Debug|Any CPU
+		{55555555-5555-5555-5555-555555555555}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{55555555-5555-5555-5555-555555555555}.Debug|x86.Build.0 = Debug|Any CPU
+		{55555555-5555-5555-5555-555555555555}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{55555555-5555-5555-5555-555555555555}.Release|Any CPU.Build.0 = Release|Any CPU
+		{55555555-5555-5555-5555-555555555555}.Release|x64.ActiveCfg = Release|Any CPU
+		{55555555-5555-5555-5555-555555555555}.Release|x64.Build.0 = Release|Any CPU
+		{55555555-5555-5555-5555-555555555555}.Release|x86.ActiveCfg = Release|Any CPU
+		{55555555-5555-5555-5555-555555555555}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -110,6 +124,7 @@ Global
 		{22222222-2222-2222-2222-222222222222} = {1B4F9A2E-8A5D-4C7B-9E3F-2D1C3E4F5A6B}
 		{33333333-3333-3333-3333-333333333333} = {1B4F9A2E-8A5D-4C7B-9E3F-2D1C3E4F5A6B}
 		{44444444-4444-4444-4444-444444444444} = {1B4F9A2E-8A5D-4C7B-9E3F-2D1C3E4F5A6B}
+		{55555555-5555-5555-5555-555555555555} = {1B4F9A2E-8A5D-4C7B-9E3F-2D1C3E4F5A6B}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {A1B2C3D4-E5F6-7890-ABCD-123456789ABC}

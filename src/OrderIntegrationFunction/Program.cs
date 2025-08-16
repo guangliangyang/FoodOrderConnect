@@ -51,7 +51,7 @@ var host = new HostBuilder()
         var serviceBusConnectionString = configuration.GetConnectionString("ServiceBusConnection");
         if (!string.IsNullOrEmpty(serviceBusConnectionString))
         {
-            services.AddSingleton<Azure.Messaging.ServiceBus.ServiceBusClient>(provider => 
+            services.AddSingleton<Azure.Messaging.ServiceBus.ServiceBusClient>(provider =>
                 new Azure.Messaging.ServiceBus.ServiceBusClient(serviceBusConnectionString));
         }
 

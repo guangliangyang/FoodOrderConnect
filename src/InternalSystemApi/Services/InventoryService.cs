@@ -25,7 +25,7 @@ public class InventoryService : IInventoryService
         var result = new InventoryReservationResult { IsSuccessful = true };
 
         using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
-        
+
         try
         {
             foreach (var request in requestList)
@@ -54,7 +54,7 @@ public class InventoryService : IInventoryService
                 inventory.LastUpdated = DateTime.UtcNow;
                 inventory.UpdatedAt = DateTime.UtcNow;
 
-                _logger.LogInformation("Reserved {Quantity} units of product {ProductId} for order {OrderId}", 
+                _logger.LogInformation("Reserved {Quantity} units of product {ProductId} for order {OrderId}",
                     request.Quantity, request.ProductId, request.OrderId);
             }
 
@@ -83,7 +83,7 @@ public class InventoryService : IInventoryService
     public async Task<bool> ReleaseReservationAsync(string orderId, CancellationToken cancellationToken = default)
     {
         using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
-        
+
         try
         {
             // Find order items to release reservations
@@ -102,7 +102,7 @@ public class InventoryService : IInventoryService
                     inventory.LastUpdated = DateTime.UtcNow;
                     inventory.UpdatedAt = DateTime.UtcNow;
 
-                    _logger.LogInformation("Released {Quantity} units of product {ProductId} from order {OrderId}", 
+                    _logger.LogInformation("Released {Quantity} units of product {ProductId} from order {OrderId}",
                         orderItem.Quantity, orderItem.ProductId, orderId);
                 }
             }
@@ -143,7 +143,7 @@ public class InventoryService : IInventoryService
     public async Task<bool> UpdateInventoryAsync(string productId, int quantityChange, string reason, CancellationToken cancellationToken = default)
     {
         using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
-        
+
         try
         {
             var inventory = await _dbContext.Inventory
@@ -158,7 +158,7 @@ public class InventoryService : IInventoryService
             var newQuantity = inventory.QuantityOnHand + quantityChange;
             if (newQuantity < 0)
             {
-                _logger.LogWarning("Inventory update would result in negative quantity for product {ProductId}. Current: {Current}, Change: {Change}", 
+                _logger.LogWarning("Inventory update would result in negative quantity for product {ProductId}. Current: {Current}, Change: {Change}",
                     productId, inventory.QuantityOnHand, quantityChange);
                 return false;
             }
@@ -188,7 +188,7 @@ public class InventoryService : IInventoryService
             await _dbContext.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
 
-            _logger.LogInformation("Updated inventory for product {ProductId}. Change: {Change}, New Quantity: {NewQuantity}, Reason: {Reason}", 
+            _logger.LogInformation("Updated inventory for product {ProductId}. Change: {Change}, New Quantity: {NewQuantity}, Reason: {Reason}",
                 productId, quantityChange, newQuantity, reason);
 
             return true;

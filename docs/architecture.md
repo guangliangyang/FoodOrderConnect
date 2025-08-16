@@ -1,53 +1,145 @@
-# 系统架构设计文档
+# BidOne Integration Platform - 系统架构文档
 
-## 概述
+## 🎯 架构概述
 
-BidOne Integration Platform Demo 采用现代微服务架构，基于 Azure 云平台构建，体现"Never Lose an Order"的核心理念。
+BidOne Integration Platform 是一个展示**现代云原生架构与 AI 智能集成**的企业级订单处理系统，核心理念是 **"Never Lose an Order"** + **"AI-Powered Customer Experience"**。
 
-## 架构原则
+## 🏛️ 设计原则
 
-### 设计原则
-1. **可靠性优先**: 确保订单处理的高可用性和数据一致性
-2. **弹性架构**: 系统具备自愈能力和故障隔离
-3. **可观测性**: 全面的监控、日志和链路追踪
-4. **安全第一**: 端到端的安全防护
-5. **可扩展性**: 支持水平扩展和业务增长
+### 核心原则
+1. **🛡️ 可靠性优先**: 确保订单处理的高可用性和数据一致性
+2. **🔄 事件驱动**: 异步消息传递和松耦合设计
+3. **🤖 AI 增强**: 智能错误处理和客户沟通自动化
+4. **📊 可观察性**: 全面的监控、日志和业务洞察
+5. **🔒 安全第一**: 端到端的安全防护和密钥管理
+6. **⚡ 高性能**: 支持水平扩展和高并发处理
 
 ### 架构模式
-- **事件驱动架构**: 基于消息的异步通信
-- **微服务架构**: 服务解耦和独立部署
-- **CQRS模式**: 命令查询职责分离
-- **Saga模式**: 分布式事务管理
+- **🔗 事件驱动架构**: Service Bus + Event Grid 异步通信
+- **🏗️ 微服务架构**: 服务解耦和独立部署  
+- **🧠 AI 集成模式**: LangChain + OpenAI 智能处理
+- **📦 容器化部署**: Docker + Azure Container Apps
+- **🔄 CQRS + 事件溯源**: 命令查询分离和事件存储
 
-## 系统架构图
+## 🏗️ 系统架构图
 
+### 整体架构
 ```mermaid
 graph TB
-    subgraph "外部系统"
+    subgraph "🌐 外部接入层"
         Client[餐厅客户端]
-        Supplier[供应商系统]
+        Mobile[移动应用]
+        Partner[合作伙伴系统]
     end
     
-    subgraph "API Gateway"
-        APIM[Azure API Management]
+    subgraph "🚪 API 网关层" 
+        APIM[Azure API Management<br/>🔐 认证授权<br/>🚦 限流熔断<br/>📊 API 监控]
     end
     
-    subgraph "应用层"
-        ExtAPI[External Order API]
-        IntAPI[Internal System API]
+    subgraph "⚙️ 微服务层"
+        ExtAPI[External Order API<br/>🛒 订单接收<br/>✅ 数据验证<br/>📤 事件发布]
+        IntAPI[Internal System API<br/>🏭 订单处理<br/>📦 库存管理<br/>🤝 供应商对接]
     end
     
-    subgraph "集成层"
-        LogicApp[Azure Logic Apps]
-        Functions[Azure Functions]
+    subgraph "🧠 智能处理层"
+        OrderFunc[Order Integration Function<br/>📋 订单验证<br/>🔍 数据丰富化<br/>⚡ 业务流程]
+        AIFunc[Customer Communication Function<br/>🤖 AI 错误分析<br/>💬 智能客户沟通<br/>📧 自动化通知]
+        LogicApp[Azure Logic Apps<br/>🔄 工作流编排<br/>🔗 系统集成]
     end
     
-    subgraph "消息层"
-        ServiceBus[Azure Service Bus]
-        EventGrid[Azure Event Grid]
+    subgraph "📡 消息传递层"
+        SB[Service Bus<br/>📬 可靠消息传递<br/>🔄 重试机制<br/>💀 死信处理]
+        EG[Event Grid<br/>⚡ 事件驱动通信<br/>🔔 实时通知<br/>📡 系统解耦]
     end
     
-    subgraph "数据层"
+    subgraph "💾 数据存储层"
+        SQL[(SQL Database<br/>📊 业务数据<br/>🔄 事务处理)]
+        Cosmos[(Cosmos DB<br/>📦 产品目录<br/>🌍 全球分布)]
+        Redis[(Redis Cache<br/>⚡ 高速缓存<br/>🎯 会话存储)]
+    end
+    
+    subgraph "🔒 安全与监控"
+        KV[Key Vault<br/>🔐 密钥管理<br/>🛡️ 证书存储]
+        AI_Insights[Application Insights<br/>📊 应用监控<br/>🔍 性能分析]
+        Grafana[Grafana<br/>📈 业务仪表板<br/>📊 实时指标]
+    end
+    
+    subgraph "🤖 AI 服务"
+        OpenAI[OpenAI API<br/>🧠 智能分析<br/>💬 内容生成]
+        LangChain[LangChain<br/>🔗 AI 工作流<br/>📝 提示工程]
+    end
+    
+    %% 数据流向
+    Client --> APIM
+    Mobile --> APIM  
+    Partner --> APIM
+    APIM --> ExtAPI
+    APIM --> IntAPI
+    
+    ExtAPI --> SB
+    SB --> OrderFunc
+    OrderFunc --> SB
+    SB --> IntAPI
+    
+    %% AI 智能处理流
+    ExtAPI -.-> EG
+    IntAPI -.-> EG
+    EG --> AIFunc
+    AIFunc --> OpenAI
+    AIFunc --> LangChain
+    AIFunc --> SB
+    
+    %% 数据访问
+    ExtAPI --> Redis
+    IntAPI --> SQL
+    OrderFunc --> Cosmos
+    AIFunc --> Redis
+    
+    %% 监控流
+    ExtAPI --> AI_Insights
+    IntAPI --> AI_Insights
+    OrderFunc --> AI_Insights
+    AIFunc --> AI_Insights
+    AI_Insights --> Grafana
+```
+
+### AI 智能沟通架构详图
+```mermaid
+sequenceDiagram
+    participant Order as 订单处理失败
+    participant SB as Service Bus<br/>high-value-errors
+    participant EG as Event Grid<br/>System Topic
+    participant AI as AI Communication<br/>Function
+    participant LC as LangChain<br/>Service
+    participant OpenAI as OpenAI<br/>API
+    participant Notify as Notification<br/>Service
+    
+    Order->>SB: 发布高价值错误事件
+    SB->>EG: 触发 Event Grid 系统事件
+    EG->>AI: 实时触发 AI 处理函数
+    
+    AI->>LC: 1. 错误智能分析
+    LC->>OpenAI: AI 分析请求
+    OpenAI-->>LC: 分析结果
+    LC-->>AI: 错误原因和影响评估
+    
+    AI->>LC: 2. 生成客户消息
+    LC->>OpenAI: 个性化消息生成
+    OpenAI-->>LC: 客户沟通内容
+    LC-->>AI: 专业道歉和解决方案
+    
+    AI->>LC: 3. 生成行动建议
+    LC->>OpenAI: 运营建议生成
+    OpenAI-->>LC: 可执行行动计划
+    LC-->>AI: 内部处理建议
+    
+    AI->>Notify: 4. 发送客户通知
+    AI->>Notify: 5. 发送内部警报
+    Notify-->>AI: 通知发送完成
+    
+    Note over AI,Notify: 整个流程 < 5秒完成
+    Note over LC,OpenAI: 支持优雅降级到智能模拟
+```
         SQL[Azure SQL Database]
         Cosmos[Azure Cosmos DB]
         Redis[Azure Cache for Redis]
