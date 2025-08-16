@@ -1,0 +1,108 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{1B4F9A2E-8A5D-4C7B-9E3F-2D1C3E4F5A6B}"
+EndProject
+
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{2C5FA3F-9B6E-4D8C-AF4G-3E2D4F5G6A7C}"
+EndProject
+
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "docs", "docs", "{3D6GB4G-AC7F-4E9D-BG5H-4F3E5G6H7B8D}"
+	ProjectSection(SolutionItems) = preProject
+		docs\architecture.md = docs\architecture.md
+		docs\deployment-guide.md = docs\deployment-guide.md
+		docs\troubleshooting.md = docs\troubleshooting.md
+		README.md = README.md
+	EndProjectSection
+EndProject
+
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "infra", "infra", "{4E7HC5H-BD8G-4F0E-CH6I-5G4F6H7I8C9E}"
+	ProjectSection(SolutionItems) = preProject
+		infra\main.bicep = infra\main.bicep
+		infra\parameters.dev.json = infra\parameters.dev.json
+		infra\parameters.staging.json = infra\parameters.staging.json
+		infra\parameters.prod.json = infra\parameters.prod.json
+		infra\logic-app-definition.json = infra\logic-app-definition.json
+	EndProjectSection
+EndProject
+
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "scripts", "scripts", "{5F8ID6I-CE9H-4G1F-DI7J-6H5G7I8J9D0F}"
+	ProjectSection(SolutionItems) = preProject
+		scripts\setup-dev-env.sh = scripts\setup-dev-env.sh
+		scripts\start-local-services.sh = scripts\start-local-services.sh
+		scripts\stop-local-services.sh = scripts\stop-local-services.sh
+		scripts\build-all.sh = scripts\build-all.sh
+		scripts\deploy-to-azure.sh = scripts\deploy-to-azure.sh
+	EndProjectSection
+EndProject
+
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "shared", "shared", "{6G9JE7J-DF0I-4H2G-EJ8K-7I6H8J9K0E1G}"
+EndProject
+
+# Source Projects
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Shared", "src\Shared\Shared.csproj", "{11111111-1111-1111-1111-111111111111}"
+EndProject
+
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ExternalOrderApi", "src\ExternalOrderApi\ExternalOrderApi.csproj", "{22222222-2222-2222-2222-222222222222}"
+EndProject
+
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "InternalSystemApi", "src\InternalSystemApi\InternalSystemApi.csproj", "{33333333-3333-3333-3333-333333333333}"
+EndProject
+
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OrderIntegrationFunction", "src\OrderIntegrationFunction\OrderIntegrationFunction.csproj", "{44444444-4444-4444-4444-444444444444}"
+EndProject
+
+# Test Projects
+# TODO: Add test projects
+
+# Shared Projects
+# TODO: Add shared projects if needed
+
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{11111111-1111-1111-1111-111111111111}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{11111111-1111-1111-1111-111111111111}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{11111111-1111-1111-1111-111111111111}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{11111111-1111-1111-1111-111111111111}.Release|Any CPU.Build.0 = Release|Any CPU
+		
+		{22222222-2222-2222-2222-222222222222}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{22222222-2222-2222-2222-222222222222}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{22222222-2222-2222-2222-222222222222}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{22222222-2222-2222-2222-222222222222}.Release|Any CPU.Build.0 = Release|Any CPU
+		
+		{33333333-3333-3333-3333-333333333333}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{33333333-3333-3333-3333-333333333333}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{33333333-3333-3333-3333-333333333333}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{33333333-3333-3333-3333-333333333333}.Release|Any CPU.Build.0 = Release|Any CPU
+		
+		{44444444-4444-4444-4444-444444444444}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{44444444-4444-4444-4444-444444444444}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{44444444-4444-4444-4444-444444444444}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{44444444-4444-4444-4444-444444444444}.Release|Any CPU.Build.0 = Release|Any CPU
+		
+		# TODO: Add test project configurations when created
+	EndGlobalSection
+	
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	
+	GlobalSection(NestedProjects) = preSolution
+		{11111111-1111-1111-1111-111111111111} = {1B4F9A2E-8A5D-4C7B-9E3F-2D1C3E4F5A6B}
+		{22222222-2222-2222-2222-222222222222} = {1B4F9A2E-8A5D-4C7B-9E3F-2D1C3E4F5A6B}
+		{33333333-3333-3333-3333-333333333333} = {1B4F9A2E-8A5D-4C7B-9E3F-2D1C3E4F5A6B}
+		{44444444-4444-4444-4444-444444444444} = {1B4F9A2E-8A5D-4C7B-9E3F-2D1C3E4F5A6B}
+		# TODO: Add test project nesting when created
+	EndGlobalSection
+	
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {A1B2C3D4-E5F6-7890-ABCD-123456789ABC}
+	EndGlobalSection
+EndGlobal

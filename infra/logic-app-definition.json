@@ -1,0 +1,322 @@
+{
+    "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "serviceBusConnectionString": {
+            "type": "string",
+            "metadata": {
+                "description": "Service Bus connection string"
+            }
+        },
+        "functionAppUrl": {
+            "type": "string",
+            "metadata": {
+                "description": "Azure Function App base URL"
+            }
+        },
+        "internalApiUrl": {
+            "type": "string",
+            "metadata": {
+                "description": "Internal System API base URL"
+            }
+        }
+    },
+    "triggers": {
+        "when_order_received": {
+            "type": "ServiceBus",
+            "inputs": {
+                "host": {
+                    "connection": {
+                        "name": "@parameters('serviceBusConnectionString')"
+                    }
+                },
+                "method": "get",
+                "path": "/@{encodeURIComponent(encodeURIComponent('order-received'))}/messages/head",
+                "queries": {
+                    "sessionId": "None"
+                }
+            },
+            "recurrence": {
+                "frequency": "Second",
+                "interval": 30
+            }
+        }
+    },
+    "actions": {
+        "parse_order_message": {
+            "type": "ParseJson",
+            "inputs": {
+                "content": "@triggerBody()?['ContentData']",
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "orderId": {
+                            "type": "string"
+                        },
+                        "customerId": {
+                            "type": "string"
+                        },
+                        "items": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "productId": {
+                                        "type": "string"
+                                    },
+                                    "quantity": {
+                                        "type": "number"
+                                    },
+                                    "unitPrice": {
+                                        "type": "number"
+                                    }
+                                }
+                            }
+                        },
+                        "deliveryDate": {
+                            "type": "string"
+                        },
+                        "createdAt": {
+                            "type": "string"
+                        }
+                    }
+                }
+            },
+            "runAfter": {}
+        },
+        "validate_order": {
+            "type": "Http",
+            "inputs": {
+                "method": "POST",
+                "uri": "@{parameters('functionAppUrl')}/api/ValidateOrder",
+                "headers": {
+                    "Content-Type": "application/json",
+                    "x-functions-key": "@parameters('$connections')['azurefunctions']['connectionId']"
+                },
+                "body": "@body('parse_order_message')",
+                "timeout": "PT2M",
+                "retryPolicy": {
+                    "type": "fixed",
+                    "count": 3,
+                    "interval": "PT30S"
+                }
+            },
+            "runAfter": {
+                "parse_order_message": [
+                    "Succeeded"
+                ]
+            }
+        },
+        "check_validation_result": {
+            "type": "If",
+            "expression": {
+                "and": [
+                    {
+                        "equals": [
+                            "@body('validate_order')?['isValid']",
+                            true
+                        ]
+                    }
+                ]
+            },
+            "actions": {
+                "enrich_order_data": {
+                    "type": "Http",
+                    "inputs": {
+                        "method": "POST",
+                        "uri": "@{parameters('functionAppUrl')}/api/EnrichOrderData",
+                        "headers": {
+                            "Content-Type": "application/json",
+                            "x-functions-key": "@parameters('$connections')['azurefunctions']['connectionId']"
+                        },
+                        "body": "@body('parse_order_message')",
+                        "timeout": "PT2M",
+                        "retryPolicy": {
+                            "type": "fixed",
+                            "count": 3,
+                            "interval": "PT30S"
+                        }
+                    }
+                },
+                "send_to_internal_api": {
+                    "type": "Http",
+                    "inputs": {
+                        "method": "POST",
+                        "uri": "@{parameters('internalApiUrl')}/api/orders",
+                        "headers": {
+                            "Content-Type": "application/json",
+                            "Authorization": "Bearer @{parameters('$connections')['internal-api']['connectionId']}"
+                        },
+                        "body": "@body('enrich_order_data')",
+                        "timeout": "PT2M",
+                        "retryPolicy": {
+                            "type": "exponential",
+                            "count": 5,
+                            "interval": "PT10S",
+                            "maximumInterval": "PT5M"
+                        }
+                    },
+                    "runAfter": {
+                        "enrich_order_data": [
+                            "Succeeded"
+                        ]
+                    }
+                },
+                "publish_order_confirmed": {
+                    "type": "ServiceBus",
+                    "inputs": {
+                        "host": {
+                            "connection": {
+                                "name": "@parameters('serviceBusConnectionString')"
+                            }
+                        },
+                        "method": "post",
+                        "path": "/@{encodeURIComponent(encodeURIComponent('order-confirmed'))}/messages",
+                        "body": {
+                            "ContentData": "@{base64(string(body('send_to_internal_api')))}",
+                            "Properties": {
+                                "OrderId": "@{body('parse_order_message')?['orderId']}",
+                                "CustomerId": "@{body('parse_order_message')?['customerId']}",
+                                "ProcessedAt": "@{utcNow()}"
+                            }
+                        }
+                    },
+                    "runAfter": {
+                        "send_to_internal_api": [
+                            "Succeeded"
+                        ]
+                    }
+                },
+                "complete_order_message": {
+                    "type": "ServiceBus",
+                    "inputs": {
+                        "host": {
+                            "connection": {
+                                "name": "@parameters('serviceBusConnectionString')"
+                            }
+                        },
+                        "method": "delete",
+                        "path": "/@{encodeURIComponent(encodeURIComponent('order-received'))}/messages/complete",
+                        "queries": {
+                            "lockToken": "@triggerBody()?['LockToken']",
+                            "sessionId": "None"
+                        }
+                    },
+                    "runAfter": {
+                        "publish_order_confirmed": [
+                            "Succeeded"
+                        ]
+                    }
+                }
+            },
+            "else": {
+                "actions": {
+                    "publish_order_failed": {
+                        "type": "ServiceBus",
+                        "inputs": {
+                            "host": {
+                                "connection": {
+                                    "name": "@parameters('serviceBusConnectionString')"
+                                }
+                            },
+                            "method": "post",
+                            "path": "/@{encodeURIComponent(encodeURIComponent('order-failed'))}/messages",
+                            "body": {
+                                "ContentData": "@{base64(string(body('parse_order_message')))}",
+                                "Properties": {
+                                    "OrderId": "@{body('parse_order_message')?['orderId']}",
+                                    "CustomerId": "@{body('parse_order_message')?['customerId']}",
+                                    "ValidationErrors": "@{string(body('validate_order')?['errors'])}",
+                                    "FailedAt": "@{utcNow()}"
+                                }
+                            }
+                        }
+                    },
+                    "complete_failed_order_message": {
+                        "type": "ServiceBus",
+                        "inputs": {
+                            "host": {
+                                "connection": {
+                                    "name": "@parameters('serviceBusConnectionString')"
+                                }
+                            },
+                            "method": "delete",
+                            "path": "/@{encodeURIComponent(encodeURIComponent('order-received'))}/messages/complete",
+                            "queries": {
+                                "lockToken": "@triggerBody()?['LockToken']",
+                                "sessionId": "None"
+                            }
+                        },
+                        "runAfter": {
+                            "publish_order_failed": [
+                                "Succeeded"
+                            ]
+                        }
+                    }
+                }
+            },
+            "runAfter": {
+                "validate_order": [
+                    "Succeeded"
+                ]
+            }
+        },
+        "handle_validation_failure": {
+            "type": "If",
+            "expression": {
+                "equals": [
+                    "@actions('validate_order')['status']",
+                    "Failed"
+                ]
+            },
+            "actions": {
+                "abandon_message_on_validation_failure": {
+                    "type": "ServiceBus",
+                    "inputs": {
+                        "host": {
+                            "connection": {
+                                "name": "@parameters('serviceBusConnectionString')"
+                            }
+                        },
+                        "method": "post",
+                        "path": "/@{encodeURIComponent(encodeURIComponent('order-received'))}/messages/abandon",
+                        "queries": {
+                            "lockToken": "@triggerBody()?['LockToken']",
+                            "sessionId": "None"
+                        }
+                    }
+                },
+                "log_validation_failure": {
+                    "type": "Compose",
+                    "inputs": {
+                        "error": "Order validation failed",
+                        "orderId": "@{body('parse_order_message')?['orderId']}",
+                        "timestamp": "@{utcNow()}",
+                        "details": "@{outputs('validate_order')}"
+                    },
+                    "runAfter": {
+                        "abandon_message_on_validation_failure": [
+                            "Succeeded"
+                        ]
+                    }
+                }
+            },
+            "runAfter": {
+                "check_validation_result": [
+                    "Skipped",
+                    "Failed"
+                ]
+            }
+        }
+    },
+    "outputs": {
+        "workflowStatus": {
+            "type": "String",
+            "value": "@workflow()['status']"
+        },
+        "processedOrderId": {
+            "type": "String",
+            "value": "@{coalesce(body('parse_order_message')?['orderId'], 'unknown')}"
+        }
+    }
+}

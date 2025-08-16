@@ -1,0 +1,244 @@
+version: '3.8'
+
+services:
+  # SQL Server for main database
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: bidone-sqlserver
+    environment:
+      ACCEPT_EULA: Y
+      SA_PASSWORD: BidOne123!
+      MSSQL_PID: Developer
+    ports:
+      - "1433:1433"
+    volumes:
+      - sqlserver-data:/var/opt/mssql
+    networks:
+      - bidone-network
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P BidOne123! -Q 'SELECT 1' || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  # Cosmos DB Emulator
+  cosmosdb:
+    image: mcr.microsoft.com/cosmosdb/linux/azure-cosmos-emulator:latest
+    container_name: bidone-cosmosdb
+    environment:
+      AZURE_COSMOS_EMULATOR_PARTITION_COUNT: 10
+      AZURE_COSMOS_EMULATOR_ENABLE_DATA_PERSISTENCE: true
+    ports:
+      - "8081:8081"
+      - "10251:10251"
+      - "10252:10252"
+      - "10253:10253"
+      - "10254:10254"
+    volumes:
+      - cosmosdb-data:/data/db
+    networks:
+      - bidone-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "https://localhost:8081/_explorer/emulator.pem"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+
+  # Redis for caching
+  redis:
+    image: redis:7-alpine
+    container_name: bidone-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - bidone-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # Azure Service Bus emulator (using Azure Service Bus emulator image)
+  servicebus:
+    image: mcr.microsoft.com/azure-messaging/servicebus-emulator:latest
+    container_name: bidone-servicebus
+    environment:
+      ACCEPT_EULA: 'Y'
+      SQL_SERVER: sqlserver
+      MSSQL_SA_PASSWORD: BidOne123!  
+    ports:
+      - "5672:5672"
+    volumes:
+      - servicebus-data:/data
+    networks:
+      - bidone-network
+    depends_on:
+      - sqlserver
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5672"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # Application Insights local emulator (using OpenTelemetry collector)
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: bidone-otel
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./config/otel-collector-config.yaml:/etc/otel-collector-config.yaml
+    ports:
+      - "4317:4317"   # OTLP gRPC receiver
+      - "4318:4318"   # OTLP HTTP receiver
+      - "8888:8888"   # Prometheus metrics
+      - "8889:8889"   # Prometheus exporter metrics
+    depends_on:
+      - jaeger
+    networks:
+      - bidone-network
+
+  # Jaeger for distributed tracing
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: bidone-jaeger
+    environment:
+      COLLECTOR_OTLP_ENABLED: true
+    ports:
+      - "16686:16686"  # Jaeger UI
+      - "14250:14250"  # gRPC 
+    networks:
+      - bidone-network
+
+  # External Order API
+  external-order-api:
+    build:
+      context: .
+      dockerfile: src/ExternalOrderApi/Dockerfile
+    container_name: bidone-external-api
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: http://+:80
+      ConnectionStrings__SqlConnectionString: "Server=sqlserver,1433;Database=BidOneDB;User Id=sa;Password=BidOne123!;TrustServerCertificate=true"
+      ConnectionStrings__RedisConnectionString: "redis:6379"
+      ConnectionStrings__ServiceBusConnection: "Endpoint=sb://servicebus:5672/;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=fake-key"
+      ApplicationInsights__ConnectionString: "InstrumentationKey=00000000-0000-0000-0000-000000000000"
+    ports:
+      - "5001:80"
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      servicebus:
+        condition: service_healthy
+    networks:
+      - bidone-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Internal System API
+  internal-system-api:
+    build:
+      context: .
+      dockerfile: src/InternalSystemApi/Dockerfile
+    container_name: bidone-internal-api
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: http://+:80
+      ConnectionStrings__DefaultConnection: "Server=sqlserver,1433;Database=BidOneDB;User Id=sa;Password=BidOne123!;TrustServerCertificate=true"
+      ConnectionStrings__CosmosDbConnectionString: "AccountEndpoint=https://cosmosdb:8081/;AccountKey=C2y6yDjf5/R+ob0N8A7Cgv30VRDJIWEHLM+4QDU5DE2nQ9nDuVTqobD4b8mGGyPMbIZnqyMsEcaGQy67XIw/Jw=="
+      ConnectionStrings__ServiceBusConnection: "Endpoint=sb://servicebus:5672/;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=fake-key"
+      ApplicationInsights__ConnectionString: "InstrumentationKey=00000000-0000-0000-0000-000000000000"
+      Jwt__SecretKey: "YourSuperSecretKeyThatIsAtLeast32CharactersLong!"
+      Jwt__Issuer: "BidOne.InternalSystemApi"
+      Jwt__Audience: "BidOne.Clients"
+    ports:
+      - "5002:80"
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+      cosmosdb:
+        condition: service_healthy
+      servicebus:
+        condition: service_healthy
+    networks:
+      - bidone-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Nginx reverse proxy
+  nginx:
+    image: nginx:alpine
+    container_name: bidone-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./config/nginx.conf:/etc/nginx/nginx.conf
+      - ./config/ssl:/etc/nginx/ssl
+    depends_on:
+      - external-order-api
+      - internal-system-api
+    networks:
+      - bidone-network
+
+  # Prometheus for metrics
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: bidone-prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      - bidone-network
+
+  # Grafana for dashboards
+  grafana:
+    image: grafana/grafana:latest
+    container_name: bidone-grafana
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin123
+      GF_USERS_ALLOW_SIGN_UP: false
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./config/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./config/grafana/datasources:/etc/grafana/provisioning/datasources
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+    networks:
+      - bidone-network
+
+volumes:
+  sqlserver-data:
+  cosmosdb-data:
+  redis-data:
+  servicebus-data:
+  prometheus-data:
+  grafana-data:
+
+networks:
+  bidone-network:
+    driver: bridge
