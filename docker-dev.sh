@@ -86,6 +86,69 @@ restart_services() {
     start_services
 }
 
+# Function to rebuild and restart specific service
+rebuild_service() {
+    local service=${1:-}
+    
+    if [ -z "$service" ]; then
+        print_error "Service name is required for rebuild command"
+        echo "Available services: external-order-api, internal-system-api"
+        exit 1
+    fi
+    
+    print_status "Rebuilding and restarting $service..."
+    
+    # Stop the specific service
+    docker-compose stop "$service"
+    
+    # Remove the old container
+    docker-compose rm -f "$service"
+    
+    # Rebuild the image
+    print_status "Rebuilding $service image..."
+    docker-compose build --no-cache "$service"
+    
+    # Start the service
+    print_status "Starting $service..."
+    docker-compose up -d "$service"
+    
+    # Check health
+    sleep 10
+    if [ "$service" = "external-order-api" ]; then
+        check_endpoint "http://localhost:5001/health" "External Order API"
+    elif [ "$service" = "internal-system-api" ]; then
+        check_endpoint "http://localhost:5002/health" "Internal System API"
+    fi
+    
+    print_success "$service rebuilt and restarted successfully!"
+}
+
+# Function to rebuild all application services
+rebuild_all() {
+    print_status "Rebuilding all application services..."
+    
+    # Stop application services
+    docker-compose stop external-order-api internal-system-api
+    
+    # Remove containers
+    docker-compose rm -f external-order-api internal-system-api
+    
+    # Rebuild images
+    print_status "Rebuilding application images..."
+    docker-compose build --no-cache external-order-api internal-system-api
+    
+    # Start services
+    print_status "Starting application services..."
+    docker-compose up -d external-order-api internal-system-api nginx
+    
+    # Wait and check health
+    sleep 20
+    check_endpoint "http://localhost:5001/health" "External Order API"
+    check_endpoint "http://localhost:5002/health" "Internal System API"
+    
+    print_success "All application services rebuilt and restarted successfully!"
+}
+
 # Function to check service health
 check_service_health() {
     local service_name=$1
@@ -212,12 +275,16 @@ show_help() {
     echo "  status    Show service status and health"
     echo "  logs      Show logs for all services"
     echo "  logs [service]  Show logs for specific service"
+    echo "  rebuild [service]  Rebuild and restart specific service"
+    echo "  rebuild-all       Rebuild all application services"
     echo "  cleanup   Stop services and remove volumes"
     echo "  help      Show this help message"
     echo ""
     echo "Examples:"
     echo "  $0 start"
     echo "  $0 logs external-order-api"
+    echo "  $0 rebuild external-order-api"
+    echo "  $0 rebuild-all"
     echo "  $0 status"
 }
 
@@ -237,6 +304,12 @@ case "${1:-}" in
         ;;
     logs)
         show_logs "${2:-}"
+        ;;
+    rebuild)
+        rebuild_service "${2:-}"
+        ;;
+    rebuild-all)
+        rebuild_all
         ;;
     cleanup)
         cleanup

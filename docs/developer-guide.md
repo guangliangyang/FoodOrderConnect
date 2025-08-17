@@ -4,6 +4,20 @@
 
 作为开发者，你有三种方式在本地运行和开发这个系统。本指南将详细介绍每种方式的优缺点和使用场景。
 
+### 🔧 开发者工具亮点
+
+本项目提供了强大的 **`docker-dev.sh`** 开发管理脚本，让你可以轻松管理整个开发环境：
+
+```bash
+./docker-dev.sh start          # 🚀 一键启动完整环境
+./docker-dev.sh rebuild external-order-api  # 🔨 修改代码后重建
+./docker-dev.sh status         # 📊 查看所有服务状态
+./docker-dev.sh logs [service] # 📝 查看实时日志
+./docker-dev.sh cleanup        # 🧹 完全清理环境
+```
+
+这比传统的 `docker-compose` 命令更智能、更便捷！
+
 ## 📋 前置要求
 
 ### 必需工具
@@ -50,30 +64,38 @@
 
 #### 启动步骤
 
+**方式一：使用开发管理脚本（推荐）**
+
 ```bash
 # 1. 克隆项目（如果还没有）
 git clone <repository-url>
 cd FoodOrderConnect
 
-# 2. 构建并启动所有服务
-docker-compose up -d
+# 2. 一键启动所有服务
+./docker-dev.sh start
 
 # 3. 查看服务状态
+./docker-dev.sh status
+
+# 4. 查看日志
+./docker-dev.sh logs external-order-api
+```
+
+**方式二：使用原生Docker Compose**
+
+```bash
+# 传统方式（如果你喜欢手动控制）
+docker-compose up -d
 docker-compose ps
-
-# 4. 等待服务就绪（大约2-3分钟）
 ./scripts/health-check.sh
-
-# 5. 查看日志（可选）
-docker-compose logs -f external-order-api
 ```
 
 #### 服务地址
 
 | 服务 | 地址 | 说明 |
 |------|------|------|
-| **External Order API** | http://localhost:8080 | 外部订单接收API |
-| **Internal System API** | http://localhost:8081 | 内部系统API |
+| **External Order API** | http://localhost:5001 | 外部订单接收API |
+| **Internal System API** | http://localhost:5002 | 内部系统API |
 | **Grafana** | http://localhost:3000 | 业务监控仪表板 (admin/admin123) |
 | **Prometheus** | http://localhost:9090 | 指标收集系统 |
 | **Jaeger** | http://localhost:16686 | 分布式链路追踪 |
@@ -82,11 +104,46 @@ docker-compose logs -f external-order-api
 | **Cosmos DB** | https://localhost:8081 | 文档数据库模拟器 |
 | **Azurite** | http://localhost:10000 | Azure Storage模拟器 |
 
+#### 开发管理命令
+
+```bash
+# 🚀 完整的开发环境管理
+./docker-dev.sh start          # 启动所有服务
+./docker-dev.sh stop           # 停止所有服务 
+./docker-dev.sh restart        # 重启所有服务
+./docker-dev.sh status         # 查看服务状态和健康检查
+
+# 🔧 代码开发和调试
+./docker-dev.sh rebuild external-order-api  # 重建特定服务（修改代码后）
+./docker-dev.sh rebuild-all    # 重建所有应用服务
+./docker-dev.sh logs           # 查看所有服务日志
+./docker-dev.sh logs external-order-api     # 查看特定服务日志
+
+# 🧹 环境清理
+./docker-dev.sh cleanup        # 完全清理环境
+
+# 📖 帮助信息
+./docker-dev.sh help           # 查看所有可用命令
+```
+
+#### 代码修改工作流
+
+```bash
+# 💡 当你修改了 ExternalOrderAPI 代码后：
+./docker-dev.sh rebuild external-order-api
+
+# 💡 当你修改了多个服务代码后：
+./docker-dev.sh rebuild-all
+
+# 💡 实时查看重建后的日志：
+./docker-dev.sh logs external-order-api -f
+```
+
 #### 测试命令
 
 ```bash
 # 发送正常订单
-curl -X POST http://localhost:8080/orders \
+curl -X POST http://localhost:5001/orders \
   -H "Content-Type: application/json" \
   -d '{
     "customerId": "customer-001",
@@ -95,7 +152,7 @@ curl -X POST http://localhost:8080/orders \
   }'
 
 # 触发AI智能错误处理
-curl -X POST http://localhost:8080/orders \
+curl -X POST http://localhost:5001/orders \
   -H "Content-Type: application/json" \
   -d '{
     "customerId": "premium-customer-001",
@@ -104,7 +161,7 @@ curl -X POST http://localhost:8080/orders \
   }'
 
 # 观察AI处理日志
-docker-compose logs customer-communication-function -f
+./docker-dev.sh logs customer-communication-function
 ```
 
 ### 模式二：混合开发模式 (推荐日常开发)
@@ -236,15 +293,19 @@ sudo systemctl start redis
 
 ## 🔧 开发工具和脚本
 
-### 健康检查脚本
+### 健康检查和监控
 
 ```bash
-# 检查所有服务状态
-./scripts/health-check.sh
+# 使用开发脚本检查（推荐）
+./docker-dev.sh status             # 完整的服务状态检查
 
-# 检查特定服务
-curl -f http://localhost:8080/health  # External API
-curl -f http://localhost:8081/health  # Internal API
+# 使用专用健康检查脚本
+./scripts/health-check.sh           # 详细的健康检查
+./scripts/health-check.sh --wait    # 等待服务就绪
+
+# 手动检查API端点
+curl -f http://localhost:5001/health  # External API
+curl -f http://localhost:5002/health  # Internal API
 ```
 
 ### 构建和测试
@@ -261,6 +322,10 @@ dotnet test
 
 # 运行特定项目的测试
 dotnet test tests/ExternalOrderApi.Tests/
+
+# 容器化测试（使用完整环境）
+./docker-dev.sh start               # 启动完整环境
+./docker-dev.sh rebuild external-order-api  # 重建后测试
 ```
 
 ### 代码格式化
@@ -302,13 +367,18 @@ kill -9 <PID>
 ### 2. Docker服务启动失败
 
 ```bash
-# 查看详细错误信息
-docker-compose logs <service-name>
+# 使用开发脚本诊断（推荐）
+./docker-dev.sh status             # 查看服务状态
+./docker-dev.sh logs <service-name> # 查看特定服务日志
+./docker-dev.sh rebuild <service-name>  # 重建问题服务
 
-# 重新构建镜像
+# 手动诊断
+docker-compose logs <service-name>
 docker-compose build --no-cache <service-name>
 
-# 完全重置Docker环境
+# 完全重置环境
+./docker-dev.sh cleanup            # 使用脚本清理
+# 或手动清理
 docker-compose down -v
 docker system prune -f
 ```
@@ -319,7 +389,10 @@ docker system prune -f
 # 检查SQL Server状态
 docker exec bidone-sql-dev /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P BidOne123! -Q "SELECT 1" -C -N
 
-# 重置数据库
+# 使用开发脚本重启（推荐）
+./docker-dev.sh restart
+
+# 或手动重置数据库
 docker-compose restart sqlserver
 sleep 30  # 等待数据库完全启动
 ```
@@ -327,7 +400,11 @@ sleep 30  # 等待数据库完全启动
 ### 4. AI功能不工作
 
 ```bash
-# 检查CustomerCommunicationFunction日志
+# 使用开发脚本检查（推荐）
+./docker-dev.sh logs customer-communication-function
+./docker-dev.sh rebuild customer-communication-function  # 如果需要重建
+
+# 手动检查
 docker-compose logs customer-communication-function
 
 # 如果没有OpenAI API Key，系统会使用智能模拟模式
@@ -337,10 +414,12 @@ docker-compose logs customer-communication-function
 ### 5. Grafana无数据
 
 ```bash
-# 检查Prometheus是否收集到数据
-curl http://localhost:9090/api/v1/targets
+# 使用开发脚本检查
+./docker-dev.sh status             # 检查所有监控服务状态
+./docker-dev.sh restart            # 重启所有服务
 
-# 重启Grafana
+# 手动检查
+curl http://localhost:9090/api/v1/targets  # 检查Prometheus目标
 docker-compose restart grafana
 
 # 访问 http://localhost:3000，账号: admin/admin123
@@ -403,8 +482,9 @@ dotnet test tests/ExternalOrderApi.Tests/
 ./scripts/start-local-services.sh
 dotnet test tests/IntegrationTests/
 
-# API测试
-curl -X POST http://localhost:8080/orders -H "Content-Type: application/json" -d @test-data/valid-order.json
+# API测试（使用完整环境）
+./docker-dev.sh start
+curl -X POST http://localhost:5001/orders -H "Content-Type: application/json" -d @test-data/valid-order.json
 ```
 
 ## 🔄 环境重置
@@ -412,6 +492,11 @@ curl -X POST http://localhost:8080/orders -H "Content-Type: application/json" -d
 如果遇到问题需要完全重置环境：
 
 ```bash
+# 使用开发脚本完全重置（推荐）
+./docker-dev.sh cleanup
+./docker-dev.sh start          # 重新启动
+
+# 手动清理（如果需要更彻底的清理）
 # 停止所有服务
 docker-compose down -v
 ./scripts/stop-local-services.sh
