@@ -37,10 +37,53 @@ check_docker() {
     fi
 }
 
+# Function to check for port conflicts
+check_port_conflicts() {
+    print_status "Checking for port conflicts..."
+    
+    # Check if port 6380 (Docker Redis) is already in use
+    if lsof -i :6380 >/dev/null 2>&1; then
+        print_warning "Port 6380 is already in use by another service"
+        print_status "Please stop the service using port 6380 or modify docker-compose.yml to use a different port"
+        return 1
+    fi
+    
+    # Check if port 6379 (local Redis) is in use - this is informational only
+    if lsof -i :6379 >/dev/null 2>&1; then
+        print_status "Local Redis detected on port 6379 (this is OK - Docker Redis will use port 6380)"
+    fi
+    
+    # Check other critical ports
+    local ports_to_check="1433 3000 9090 16686 5672 8081 10000"
+    local conflicts_found=false
+    
+    for port in $ports_to_check; do
+        if lsof -i :$port >/dev/null 2>&1; then
+            local service_name=$(lsof -i :$port | tail -n 1 | awk '{print $1}')
+            print_warning "Port $port is already in use by $service_name"
+            conflicts_found=true
+        fi
+    done
+    
+    if [ "$conflicts_found" = true ]; then
+        print_warning "Some ports are in use. Docker may fail to start or you may connect to wrong services."
+        print_status "Consider stopping conflicting services or changing port mappings in docker-compose.yml"
+        
+        read -p "Continue anyway? (y/N): " confirm
+        if [[ ! $confirm =~ ^[Yy]$ ]]; then
+            print_status "Startup cancelled by user"
+            exit 1
+        fi
+    else
+        print_success "No port conflicts detected"
+    fi
+}
+
 # Function to start infrastructure services only (for local development)
 start_infrastructure() {
     print_status "Starting infrastructure services for local development..."
     check_docker
+    check_port_conflicts
     
     # Start only infrastructure services
     print_status "Starting infrastructure services..."
@@ -57,7 +100,7 @@ start_infrastructure() {
     print_success "Infrastructure services started successfully!"
     print_status "Infrastructure services available at:"
     echo "  - SQL Server: localhost:1433 (sa/BidOne123!)"
-    echo "  - Redis: localhost:6379"
+    echo "  - Redis: localhost:6380"
     echo "  - Cosmos DB Emulator: https://localhost:8081/_explorer/index.html"
     echo "  - Azurite Storage: localhost:10000 (blob), localhost:10001 (queue)"
     echo "  - Service Bus: localhost:5672"
@@ -80,6 +123,7 @@ start_infrastructure() {
 start_services() {
     print_status "Starting complete BidOne development environment..."
     check_docker
+    check_port_conflicts
     
     # Start infrastructure services first
     print_status "Starting infrastructure services..."

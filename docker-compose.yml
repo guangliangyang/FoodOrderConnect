@@ -51,7 +51,7 @@ services:
     image: redis:7-alpine
     container_name: bidone-redis
     ports:
-      - "6379:6379"
+      - "6380:6379"  # Map to 6380 to avoid conflict with local Redis
     volumes:
       - redis-data:/data
     networks:
@@ -133,10 +133,9 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       ASPNETCORE_URLS: http://+:80
-      ConnectionStrings__SqlConnectionString: "Server=sqlserver,1433;Database=BidOneDB;User Id=sa;Password=BidOne123!;TrustServerCertificate=true"
-      ConnectionStrings__RedisConnectionString: "redis:6379"
-      ConnectionStrings__ServiceBusConnection: "Endpoint=sb://servicebus:5672/;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=fake-key"
-      ApplicationInsights__ConnectionString: "InstrumentationKey=00000000-0000-0000-0000-000000000000"
+      ConnectionStrings__Redis: "redis:6379"
+      ConnectionStrings__ServiceBus: "Endpoint=sb://servicebus:5672/;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=fake-key"
+      ConnectionStrings__ApplicationInsights: "InstrumentationKey=00000000-0000-0000-0000-000000000000"
     ports:
       - "5001:80"
     depends_on:
@@ -166,8 +165,9 @@ services:
       ASPNETCORE_URLS: http://+:80
       ConnectionStrings__DefaultConnection: "Server=sqlserver,1433;Database=BidOneDB;User Id=sa;Password=BidOne123!;TrustServerCertificate=true"
       ConnectionStrings__CosmosDbConnectionString: "AccountEndpoint=https://cosmosdb:8081/;AccountKey=C2y6yDjf5/R+ob0N8A7Cgv30VRDJIWEHLM+4QDU5DE2nQ9nDuVTqobD4b8mGGyPMbIZnqyMsEcaGQy67XIw/Jw=="
-      ConnectionStrings__ServiceBusConnection: "Endpoint=sb://servicebus:5672/;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=fake-key"
-      ApplicationInsights__ConnectionString: "InstrumentationKey=00000000-0000-0000-0000-000000000000"
+      ConnectionStrings__Redis: "redis:6379"
+      ConnectionStrings__ServiceBus: "Endpoint=sb://servicebus:5672/;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=fake-key"
+      ConnectionStrings__ApplicationInsights: "InstrumentationKey=00000000-0000-0000-0000-000000000000"
       Jwt__SecretKey: "YourSuperSecretKeyThatIsAtLeast32CharactersLong!"
       Jwt__Issuer: "BidOne.InternalSystemApi"
       Jwt__Audience: "BidOne.Clients"

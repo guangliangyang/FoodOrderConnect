@@ -14,7 +14,7 @@
 | 服务 | 端口 | 用途 | 访问地址 |
 |------|------|------|----------|
 | **SQL Server** | 1433 | 主数据库 | localhost:1433 |
-| **Redis** | 6379 | 缓存 | localhost:6379 |
+| **Redis** | 6380 | 缓存 | localhost:6380 |
 | **Cosmos DB** | 8081 | 文档数据库 | https://localhost:8081 |
 | **Service Bus** | 5672 | 消息队列 | localhost:5672 |
 | **Prometheus** | 9090 | 指标收集 | http://localhost:9090 |
@@ -24,15 +24,25 @@
 
 ## 🔧 问题解决
 
-### 原问题：端口冲突
+### 解决的问题：端口冲突
+
+#### 问题1：API端口冲突
 - **问题**: 两个API项目 `dotnet run` 都默认使用5000端口
 - **影响**: 无法同时在本地运行两个API
+- **解决方案**: 创建 `launchSettings.json` 配置文件，分配专用端口
 
-### 解决方案：端口分离
-1. **创建 `launchSettings.json`** 配置文件
-2. **分配专用端口**:
+#### 问题2：Redis端口冲突  
+- **问题**: Mac本地安装的Redis占用6379端口，与Docker Redis冲突
+- **影响**: 应用连接到错误的Redis实例，导致数据不一致
+- **解决方案**: Docker Redis映射到6380端口，避免与本地Redis(6379)冲突
+
+### 端口分配策略
+1. **API服务端口分离**:
    - External Order API: 5001/7001
    - Internal System API: 5002/7002
+2. **Redis端口分离**:
+   - 本地Redis: 6379 (如果安装)
+   - Docker Redis: 6380
 3. **统一容器和本地端口**: 确保开发体验一致
 
 ### 配置文件位置

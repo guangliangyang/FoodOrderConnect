@@ -35,7 +35,7 @@
 - **磁盘**: 至少 10GB 可用空间
 - **端口**: 确保以下端口未被占用：
   - 1433 (SQL Server)
-  - 6379 (Redis)
+  - 6380 (Redis)
   - 8080-8081 (APIs), 8081 (Cosmos DB)
   - 10000-10254 (Azurite & Cosmos DB additional ports)
   - 3000, 9090 (Grafana, Prometheus)
@@ -108,7 +108,7 @@ docker exec -it bidone-sqlserver /opt/mssql-tools18/bin/sqlcmd -S localhost -U s
 | **Prometheus** | http://localhost:9090 | 指标收集系统 |
 | **Jaeger** | http://localhost:16686 | 分布式链路追踪 |
 | **SQL Server** | localhost:1433 | 数据库 (sa/BidOne123!) |
-| **Redis** | localhost:6379 | 缓存服务 |
+| **Redis** | localhost:6380 | 缓存服务 |
 | **Cosmos DB** | https://localhost:8081 | 文档数据库模拟器 |
 | **Azurite** | http://localhost:10000 | Azure Storage模拟器 |
 
@@ -318,7 +318,7 @@ sudo systemctl start redis
 {
   "ConnectionStrings": {
     "DefaultConnection": "Server=(localdb)\\mssqllocaldb;Database=BidOneDB_Dev;Trusted_Connection=True;",
-    "Redis": "localhost:6379",
+    "Redis": "localhost:6380",
     "ServiceBus": "本地Service Bus配置"
   }
 }
@@ -418,7 +418,7 @@ docker exec bidone-sqlserver /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P
 
 **问题症状**：
 - API启动时出现 `RedisConnectionException: UnableToConnect`
-- 错误信息包含 "Connection refused (127.0.0.1:6379)"
+- 错误信息包含 "Connection refused (127.0.0.1:6380)"
 - API返回500错误，无法处理订单
 
 **常见原因**：
@@ -437,8 +437,8 @@ docker exec bidone-redis redis-cli ping
 # 应该返回：PONG
 
 # 3. 测试端口连接
-nc -zv localhost 6379
-# 应该显示：Connection to localhost port 6379 [tcp/*] succeeded!
+nc -zv localhost 6380
+# 应该显示：Connection to localhost port 6380 [tcp/*] succeeded!
 
 # 4. 如果Redis未启动，重新启动基础设施
 ./docker-dev.sh infra
