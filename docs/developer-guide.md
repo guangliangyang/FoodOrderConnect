@@ -196,8 +196,12 @@ curl -X POST http://localhost:5001/orders \
 # 1. 启动基础设施服务（数据库、缓存等）
 ./docker-dev.sh infra
 
+# 🚨 重要：等待所有基础设施服务完全就绪
+# 观察到 "Infrastructure services started successfully!" 消息
+# 建议等待30-60秒确保Redis、SQL Server等服务完全初始化
+
 # 2. 🚨 首次运行：初始化数据库（重要！）
-# 等待基础设施服务启动完成后
+# 确保基础设施服务完全启动后
 cd src/InternalSystemApi
 dotnet ef migrations add InitialCreate    # 创建迁移文件（首次运行）
 dotnet ef database update               # 应用迁移，创建表结构
@@ -410,7 +414,49 @@ docker exec bidone-sqlserver /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P
 - 团队新成员必须运行此步骤
 - 可以将此步骤添加到项目onboarding流程
 
-### 2. 端口被占用
+### 2. Redis连接失败 (混合开发模式)
+
+**问题症状**：
+- API启动时出现 `RedisConnectionException: UnableToConnect`
+- 错误信息包含 "Connection refused (127.0.0.1:6379)"
+- API返回500错误，无法处理订单
+
+**常见原因**：
+- 基础设施服务未启动或Redis容器未完全就绪
+- API启动过快，Redis还在初始化中
+- Redis连接超时配置过短
+
+**解决方案**：
+```bash
+# 1. 确认基础设施服务状态
+./docker-dev.sh status
+# 确保看到：bidone-redis running (healthy)
+
+# 2. 测试Redis连接
+docker exec bidone-redis redis-cli ping
+# 应该返回：PONG
+
+# 3. 测试端口连接
+nc -zv localhost 6379
+# 应该显示：Connection to localhost port 6379 [tcp/*] succeeded!
+
+# 4. 如果Redis未启动，重新启动基础设施
+./docker-dev.sh infra
+
+# 5. 等待所有服务完全就绪（约30-60秒）
+sleep 60
+
+# 6. 重新启动API
+cd src/ExternalOrderApi
+dotnet run
+```
+
+**预防措施**：
+- 在启动API前，确保 `./docker-dev.sh infra` 已完成并显示所有服务健康
+- 观察到 "Infrastructure services started successfully!" 消息后再启动API
+- 如果仍有问题，可能需要增加Redis初始化等待时间
+
+### 3. 端口被占用
 
 ```bash
 # 查看端口占用
