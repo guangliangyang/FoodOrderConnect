@@ -44,7 +44,7 @@ start_infrastructure() {
     
     # Start only infrastructure services
     print_status "Starting infrastructure services..."
-    docker-compose up -d sqlserver redis cosmosdb servicebus otel-collector jaeger prometheus grafana
+    docker-compose up -d sqlserver redis cosmosdb azurite servicebus otel-collector jaeger prometheus grafana
     
     print_status "Waiting for infrastructure services to be healthy..."
     sleep 30
@@ -59,6 +59,7 @@ start_infrastructure() {
     echo "  - SQL Server: localhost:1433 (sa/BidOne123!)"
     echo "  - Redis: localhost:6379"
     echo "  - Cosmos DB Emulator: https://localhost:8081/_explorer/index.html"
+    echo "  - Azurite Storage: localhost:10000 (blob), localhost:10001 (queue)"
     echo "  - Service Bus: localhost:5672"
     echo "  - Grafana Dashboard: http://localhost:3000 (admin/admin123)"
     echo "  - Prometheus: http://localhost:9090"
@@ -66,9 +67,13 @@ start_infrastructure() {
     echo ""
     print_status "Now you can run your applications locally:"
     echo "  - External Order API: cd src/ExternalOrderApi && dotnet run"
+    echo "    → Will be available at: http://localhost:5001 & https://localhost:7001"
     echo "  - Internal System API: cd src/InternalSystemApi && dotnet run"
+    echo "    → Will be available at: http://localhost:5002 & https://localhost:7002"
     echo "  - Order Function: cd src/OrderIntegrationFunction && func start"
+    echo "    → Will be available at: http://localhost:7071"
     echo "  - AI Function: cd src/CustomerCommunicationFunction && func start --port 7072"
+    echo "    → Will be available at: http://localhost:7072"
 }
 
 # Function to start all services (complete containerized environment)
@@ -78,7 +83,7 @@ start_services() {
     
     # Start infrastructure services first
     print_status "Starting infrastructure services..."
-    docker-compose up -d sqlserver redis cosmosdb servicebus otel-collector jaeger prometheus grafana
+    docker-compose up -d sqlserver redis cosmosdb azurite servicebus otel-collector jaeger prometheus grafana
     
     print_status "Waiting for infrastructure services to be healthy..."
     sleep 30
@@ -103,6 +108,7 @@ start_services() {
     echo "  - Prometheus: http://localhost:9090"
     echo "  - Jaeger UI: http://localhost:16686"
     echo "  - Cosmos DB Emulator: https://localhost:8081/_explorer/index.html"
+    echo "  - Azurite Storage: localhost:10000 (blob), localhost:10001 (queue)"
     echo ""
     print_warning "Azure Functions are not containerized. To start them locally:"
     echo "  - cd src/OrderIntegrationFunction && func start"
@@ -259,10 +265,92 @@ check_endpoint() {
 
 # Function to clean up
 cleanup() {
+    local force_all=${1:-false}
+    
+    if [ "$force_all" = "--force" ]; then
+        print_warning "🚨 FORCE MODE: This will remove ALL images including infrastructure images!"
+        print_warning "You will need to re-download SQL Server, Redis, Cosmos DB, etc."
+        read -p "Are you sure? Type 'YES' to continue: " confirm
+        if [ "$confirm" != "YES" ]; then
+            print_status "Cleanup cancelled."
+            return 0
+        fi
+    fi
+    
     print_status "Cleaning up BidOne development environment..."
+    
+    # Stop all services
+    print_status "Stopping all services..."
     docker-compose down -v --remove-orphans
+    
+    if [ "$force_all" = "--force" ]; then
+        # Force mode: Remove ALL project-related images
+        print_status "🚨 FORCE MODE: Removing ALL BidOne related images..."
+        docker images --format "table {{.Repository}}:{{.Tag}}\t{{.ID}}" | grep -E "(bidone|foodorderconnect|mcr\.microsoft\.com|postgres|redis|grafana|nginx|otel|jaeger|prometheus)" | awk '{print $2}' | xargs -r docker rmi -f
+    else
+        # Normal mode: Remove only BidOne application images (not infrastructure images)
+        print_status "Removing BidOne application images..."
+        # Only remove images with bidone/foodorderconnect in the name, excluding base infrastructure images
+        docker images --format "table {{.Repository}}:{{.Tag}}\t{{.ID}}" | grep -E "(bidone|foodorderconnect)" | grep -v -E "(mcr\.microsoft\.com|postgres|redis|grafana|nginx|otel|jaeger|prometheus)" | awk '{print $2}' | xargs -r docker rmi -f
+    fi
+    
+    # Clean up unused Docker resources
+    print_status "Cleaning up unused Docker resources..."
     docker system prune -f
-    print_success "Cleanup completed."
+    
+    # Optional: Remove unused volumes (more aggressive cleanup)
+    print_status "Removing unused volumes..."
+    docker volume prune -f
+    
+    # Optional: Remove unused networks
+    print_status "Removing unused networks..."
+    docker network prune -f
+    
+    print_success "Complete cleanup finished."
+    print_status "Removed:"
+    echo "  ✅ All BidOne containers and services"
+    if [ "$force_all" = "--force" ]; then
+        echo "  ✅ ALL images (including infrastructure images)"
+    else
+        echo "  ✅ BidOne application images (our custom built images)"
+    fi
+    echo "  ✅ Unused Docker volumes"
+    echo "  ✅ Unused Docker networks"
+    echo "  ✅ Dangling images and build cache"
+    echo ""
+    if [ "$force_all" != "--force" ]; then
+        print_status "Kept:"
+        echo "  🔄 Infrastructure images (SQL Server, Redis, Cosmos DB, etc.)"
+        echo "  🔄 Base images (nginx, grafana, prometheus, etc.)"
+        echo ""
+        print_status "Note: Use './docker-dev.sh cleanup --force' to remove ALL images"
+    fi
+    print_status "Use './docker-dev.sh reset' for lighter cleanup without removing any images"
+}
+
+# Function to reset (lighter cleanup, keeps images)
+reset() {
+    print_status "Resetting BidOne development environment..."
+    
+    # Stop all services and remove containers
+    print_status "Stopping all services and removing containers..."
+    docker-compose down -v --remove-orphans
+    
+    # Only remove dangling images and build cache
+    print_status "Cleaning up dangling images and build cache..."
+    docker system prune -f
+    
+    print_success "Reset completed."
+    print_status "Removed:"
+    echo "  ✅ All BidOne containers and services"
+    echo "  ✅ All volumes and networks"
+    echo "  ✅ Dangling images and build cache"
+    echo ""
+    print_status "Kept:"
+    echo "  🔄 Base images (postgres, redis, etc.)"
+    echo "  🔄 BidOne application images"
+    echo ""
+    print_status "Use './docker-dev.sh cleanup' for complete cleanup including images"
 }
 
 # Function to show help
@@ -283,7 +371,9 @@ show_help() {
     echo "  logs [service]  Show logs for specific service"
     echo "  rebuild [service]  Rebuild and restart specific service"
     echo "  rebuild-all       Rebuild all application services"
-    echo "  cleanup   Stop services and remove volumes"
+    echo "  reset     Light cleanup (stop services, keep images for faster restart)"
+    echo "  cleanup   Complete cleanup (stop services, remove app images, volumes, networks)"
+    echo "  cleanup --force  Nuclear cleanup (remove ALL images including infrastructure)"
     echo "  help      Show this help message"
     echo ""
     echo "🎯 Usage Scenarios:"
@@ -302,6 +392,9 @@ show_help() {
     echo "  $0 start                    # Start complete containerized environment"
     echo "  $0 logs external-order-api  # View API logs"
     echo "  $0 rebuild external-order-api  # Rebuild after code changes"
+    echo "  $0 reset                    # Quick reset (keep images)"
+    echo "  $0 cleanup                  # Complete cleanup (remove app images)"
+    echo "  $0 cleanup --force          # Nuclear cleanup (remove ALL images)"
     echo "  $0 status                   # Check all service health"
 }
 
@@ -331,8 +424,11 @@ case "${1:-}" in
     rebuild-all)
         rebuild_all
         ;;
+    reset)
+        reset
+        ;;
     cleanup)
-        cleanup
+        cleanup "${2:-}"
         ;;
     help|--help|-h)
         show_help

@@ -72,12 +72,31 @@ cd FoodOrderConnect
 # 2. 一键启动所有服务
 ./docker-dev.sh start
 
-# 3. 查看服务状态
+# 3. 🚨 首次运行：初始化数据库（重要！）
+# 等待容器启动完成后，需要创建数据库表结构
+cd src/InternalSystemApi
+dotnet ef migrations add InitialCreate    # 创建迁移文件（首次运行）
+dotnet ef database update               # 应用迁移，创建表结构
+
+# 4. 验证数据库初始化
+# 进入数据库检查表是否创建成功
+docker exec -it bidone-sqlserver /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P BidOne123! -C -N
+# 在 sqlcmd 中执行：
+# 1> USE BidOneDB;
+# 2> SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE';
+# 3> GO
+# 应该看到: Orders, OrderItems, Customers, Products 等表
+
+# 5. 查看服务状态
 ./docker-dev.sh status
 
-# 4. 查看日志
+# 6. 查看日志
 ./docker-dev.sh logs external-order-api
 ```
+
+> **⚠️ 重要提醒：首次运行必须执行数据库初始化！**
+> 
+> 如果跳过步骤3，API会因为找不到数据库表而启动失败。这是Entity Framework项目的标准初始化流程。
 
 #### 服务地址
 
@@ -177,39 +196,60 @@ curl -X POST http://localhost:5001/orders \
 # 1. 启动基础设施服务（数据库、缓存等）
 ./docker-dev.sh infra
 
-# 2. 等待服务就绪
-# 脚本会自动检查服务状态
+# 2. 🚨 首次运行：初始化数据库（重要！）
+# 等待基础设施服务启动完成后
+cd src/InternalSystemApi
+dotnet ef migrations add InitialCreate    # 创建迁移文件（首次运行）
+dotnet ef database update               # 应用迁移，创建表结构
 
-# 3a. 使用IDE运行API项目（推荐）
+# 3. 验证数据库初始化（可选）
+docker exec bidone-sqlserver /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P BidOne123! -C -N -Q "USE BidOneDB; SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE';"
+# 应该返回大于1的数字（包含业务表）
+
+# 4a. 使用IDE运行API项目（推荐）
 # 在 Visual Studio 或 VS Code 中：
 # - 设置启动项目为 ExternalOrderApi
 # - 按 F5 开始调试
 
 # 3b. 或使用命令行运行
-# 终端1: External Order API
+# 终端1: External Order API (http://localhost:5001)
 cd src/ExternalOrderApi
 dotnet run
 
-# 终端2: Internal System API  
+# 终端2: Internal System API (http://localhost:5002)
 cd src/InternalSystemApi
 dotnet run
 
-# 终端3: Order Integration Function
+# 终端3: Order Integration Function (http://localhost:7071)
 cd src/OrderIntegrationFunction
 func start
 
-# 终端4: Customer Communication Function (AI功能)
+# 终端4: Customer Communication Function (http://localhost:7072)
 cd src/CustomerCommunicationFunction
 func start --port 7072
 ```
 
 #### 配置说明
 
-项目会自动使用以下配置文件：
-- `appsettings.Development.json` - API项目配置
+项目已预配置了正确的端口分配：
+
+**混合开发模式** (本地运行):
+- External Order API: http://localhost:5001 & https://localhost:7001
+- Internal System API: http://localhost:5002 & https://localhost:7002
+- Order Function: http://localhost:7071
+- AI Function: http://localhost:7072
+
+**完全容器化模式**:
+- External Order API: http://localhost:5001 (容器映射)
+- Internal System API: http://localhost:5002 (容器映射)
+- 基础设施服务端口保持一致
+
+配置文件说明：
+- `Properties/launchSettings.json` - 本地开发端口配置
+- `appsettings.Development.json` - API项目配置（指向Docker服务）
 - `local.settings.json` - Azure Functions配置
 
-这些文件已经预配置了正确的连接字符串指向Docker服务。
+🎯 **设计优势**: 两种模式使用相同的端口，确保开发体验一致性。
 
 #### 调试技巧
 
@@ -342,7 +382,35 @@ dotnet ef database drop --project src/InternalSystemApi
 
 ## 🐛 常见问题解决
 
-### 1. 端口被占用
+### 1. 🚨 首次运行：数据库表不存在
+
+**问题症状**：
+- API启动失败，日志显示 "Invalid object name 'Orders'"
+- 数据库中只有 `__EFMigrationsHistory` 表
+- Entity Framework 相关错误
+
+**解决方案**：
+```bash
+# 1. 确保基础设施服务运行
+./docker-dev.sh infra
+
+# 2. 创建并应用数据库迁移
+cd src/InternalSystemApi
+dotnet ef migrations add InitialCreate    # 首次运行必需
+dotnet ef database update               # 创建所有表
+
+# 3. 验证表是否创建成功
+docker exec bidone-sqlserver /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P BidOne123! -C -N -Q "USE BidOneDB; SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE';"
+
+# 应该看到: Orders, OrderItems, Customers, Products, Inventory 等表
+```
+
+**预防措施**：
+- 首次克隆项目后，始终先执行数据库初始化
+- 团队新成员必须运行此步骤
+- 可以将此步骤添加到项目onboarding流程
+
+### 2. 端口被占用
 
 ```bash
 # 查看端口占用
@@ -478,27 +546,62 @@ curl -X POST http://localhost:5001/orders -H "Content-Type: application/json" -d
 
 ## 🔄 环境重置
 
-如果遇到问题需要完全重置环境：
+如果遇到问题需要重置环境，有两种清理选项：
 
+### 快速重置（推荐日常使用）
 ```bash
-# 使用开发脚本完全重置（推荐）
-./docker-dev.sh cleanup
+# 快速重置 - 保留镜像，下次启动更快
+./docker-dev.sh reset
 ./docker-dev.sh start          # 重新启动
 
-# 手动清理（如果需要更彻底的清理）
-docker-compose down -v
+# 🔄 保留的内容：
+#   - 基础镜像（postgres, redis, nginx等）
+#   - BidOne应用镜像
+# ✅ 清理的内容：
+#   - 所有容器和服务
+#   - 所有卷和网络
+#   - 悬空镜像和构建缓存
+```
 
-# 清理Docker资源
-docker system prune -f
-docker volume prune -f
+### 完全清理（重置应用镜像）
+```bash
+# 完全清理 - 删除自定义应用镜像，保留基础设施镜像
+./docker-dev.sh cleanup
+./docker-dev.sh start          # 重新启动（需要重新构建应用镜像）
 
-# 清理构建产物
+# ✅ 清理的内容：
+#   - 所有容器和服务
+#   - BidOne自定义应用镜像
+#   - 所有卷和网络
+#   - 悬空镜像和构建缓存
+# 🔄 保留的内容：
+#   - 基础设施镜像（SQL Server, Redis, Cosmos DB等）
+#   - 第三方镜像（nginx, grafana, prometheus等）
+```
+
+### 核心清理（仅在必要时使用）
+```bash
+# 🚨 核心清理 - 删除所有镜像包括基础设施镜像
+./docker-dev.sh cleanup --force
+# 需要输入 'YES' 确认，会删除SQL Server、Redis等大型镜像
+# 下次启动需要重新下载所有镜像（可能需要较长时间）
+
+# ✅ 清理的内容：
+#   - 所有容器和服务
+#   - 所有项目相关镜像（包括基础设施镜像）
+#   - 所有卷和网络
+#   - 悬空镜像和构建缓存
+```
+
+### 代码级重置
+```bash
+# 清理.NET构建产物
 dotnet clean
 rm -rf **/bin **/obj
 
-# 重新开始
-# 重新初始化开发环境（如果需要）
-./scripts/start-local-services.sh
+# 重置Git状态（谨慎使用）
+git clean -fd
+git reset --hard HEAD
 ```
 
 ## 📚 进阶主题

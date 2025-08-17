@@ -30,8 +30,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="../Shared/Shared.csproj" />
-    <ProjectReference Include="../../shared/Common/Common.csproj" />
+    <ProjectReference Include="../Shared/Shared.csproj" /> 
   </ItemGroup>
 
   <ItemGroup>

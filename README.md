@@ -126,15 +126,22 @@ cd FoodOrderConnect
 # 2. 启动完整开发环境 (包含 AI 智能沟通系统)
 ./docker-dev.sh start
 
-# 3. 验证服务状态
+# 3. 🚨 首次运行：初始化数据库 (重要！)
+cd src/InternalSystemApi
+dotnet ef migrations add InitialCreate    # 创建迁移文件（首次运行）
+dotnet ef database update               # 创建数据库表结构
+
+# 4. 验证服务状态
 ./docker-dev.sh status
 
-# 4. 访问服务
+# 5. 访问服务
 echo "External Order API: http://localhost:5001"
 echo "Internal System API: http://localhost:5002"  
 echo "Grafana Dashboard: http://localhost:3000 (admin/admin123)"
 echo "Prometheus: http://localhost:9090"
 ```
+
+> **⚠️ 重要提示：首次运行必须执行步骤3的数据库初始化，否则API无法正常启动！**
 
 ### ☁️ Azure 部署 (可选)
 
@@ -203,12 +210,12 @@ curl -X POST http://localhost:5001/orders \
 ./docker-dev.sh infra
 
 # 2. 在IDE中运行API项目或使用命令行
-dotnet run --project src/ExternalOrderApi    # 终端1
-dotnet run --project src/InternalSystemApi   # 终端2
+dotnet run --project src/ExternalOrderApi    # 终端1 → http://localhost:5001
+dotnet run --project src/InternalSystemApi   # 终端2 → http://localhost:5002
 
 # 3. 运行Azure Functions (需要安装Azure Functions Core Tools)
-cd src/OrderIntegrationFunction && func start              # 终端3
-cd src/CustomerCommunicationFunction && func start --port 7072  # 终端4
+cd src/OrderIntegrationFunction && func start              # 终端3 → http://localhost:7071
+cd src/CustomerCommunicationFunction && func start --port 7072  # 终端4 → http://localhost:7072
 ```
 
 ### 开发工具脚本
@@ -230,7 +237,9 @@ cd src/CustomerCommunicationFunction && func start --port 7072  # 终端4
 ./docker-dev.sh logs external-order-api     # 查看特定服务日志
 
 # 🧹 环境清理
-./docker-dev.sh cleanup         # 完全清理环境
+./docker-dev.sh reset           # 快速重置（保留所有镜像）
+./docker-dev.sh cleanup         # 智能清理（删除应用镜像，保留基础设施镜像）
+./docker-dev.sh cleanup --force # 完全清理（删除所有镜像，需要确认）
 
 # 📖 帮助信息
 ./docker-dev.sh help            # 查看所有可用命令和使用场景
