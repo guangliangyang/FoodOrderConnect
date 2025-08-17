@@ -64,8 +64,6 @@
 
 #### 启动步骤
 
-**方式一：使用开发管理脚本（推荐）**
-
 ```bash
 # 1. 克隆项目（如果还没有）
 git clone <repository-url>
@@ -79,15 +77,6 @@ cd FoodOrderConnect
 
 # 4. 查看日志
 ./docker-dev.sh logs external-order-api
-```
-
-**方式二：使用原生Docker Compose**
-
-```bash
-# 传统方式（如果你喜欢手动控制）
-docker-compose up -d
-docker-compose ps
-./scripts/health-check.sh
 ```
 
 #### 服务地址
@@ -186,7 +175,7 @@ curl -X POST http://localhost:5001/orders \
 
 ```bash
 # 1. 启动基础设施服务（数据库、缓存等）
-./scripts/start-local-services.sh
+./docker-dev.sh start
 
 # 2. 等待服务就绪
 # 脚本会自动检查服务状态
@@ -479,7 +468,7 @@ catch (Exception ex)
 dotnet test tests/ExternalOrderApi.Tests/
 
 # 集成测试（需要Docker服务运行）
-./scripts/start-local-services.sh
+./docker-dev.sh start
 dotnet test tests/IntegrationTests/
 
 # API测试（使用完整环境）
@@ -497,9 +486,7 @@ curl -X POST http://localhost:5001/orders -H "Content-Type: application/json" -d
 ./docker-dev.sh start          # 重新启动
 
 # 手动清理（如果需要更彻底的清理）
-# 停止所有服务
 docker-compose down -v
-./scripts/stop-local-services.sh
 
 # 清理Docker资源
 docker system prune -f

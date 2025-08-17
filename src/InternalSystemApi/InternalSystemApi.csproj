@@ -39,7 +39,6 @@
 
   <ItemGroup>
     <ProjectReference Include="../Shared/Shared.csproj" />
-    <ProjectReference Include="../../shared/Common/Common.csproj" />
   </ItemGroup>
 
 </Project>

@@ -11,7 +11,6 @@ WORKDIR /src
 # Copy project files
 COPY ["src/InternalSystemApi/InternalSystemApi.csproj", "src/InternalSystemApi/"]
 COPY ["src/Shared/Shared.csproj", "src/Shared/"]
-COPY ["shared/Common/Common.csproj", "shared/Common/"]
 
 # Restore dependencies
 RUN dotnet restore "src/InternalSystemApi/InternalSystemApi.csproj"

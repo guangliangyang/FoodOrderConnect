@@ -63,13 +63,16 @@ start_services() {
     
     print_success "Development environment started successfully!"
     print_status "Services available at:"
-    echo "  - API Gateway: http://localhost"
     echo "  - External Order API: http://localhost:5001"
     echo "  - Internal System API: http://localhost:5002"
     echo "  - Grafana Dashboard: http://localhost:3000 (admin/admin123)"
     echo "  - Prometheus: http://localhost:9090"
     echo "  - Jaeger UI: http://localhost:16686"
     echo "  - Cosmos DB Emulator: https://localhost:8081/_explorer/index.html"
+    echo ""
+    print_warning "Azure Functions are not containerized. To start them locally:"
+    echo "  - cd src/OrderIntegrationFunction && func start"
+    echo "  - cd src/CustomerCommunicationFunction && func start --port 7072"
 }
 
 # Function to stop services
@@ -159,57 +162,23 @@ check_service_health() {
     print_status "Checking health of $display_name..."
     
     while [ $attempt -le $max_attempts ]; do
-
-        container_status=$(docker-compose ps --filter "name=$service_name" --format "{{.State}}")
-
-        if [ "$container_status" = "exited" ]; then
-            print_error "Error: Container '$service_name' has exited. Check logs for details."
-            return 1
-        elif [ "$container_status" = "restarting" ]; then
-            print_warning "Warning: Container '$service_name' is restarting."
-        elif [ "$container_status" = "unhealthy" ]; then
-            print_error "Error: Container '$service_name' is marked as unhealthy by its healthcheck."
-            return 1
-        else
-            print_status "Waiting for $display_name to be healthy (attempt $attempt/$max_attempts)..."
+        # Get container status using docker-compose ps
+        container_status=$(docker-compose ps --services --filter "name=$service_name" -q 2>/dev/null)
+        
+        if [ -n "$container_status" ]; then
+            # Check if container is running
+            if docker-compose ps $service_name | grep -q "running"; then
+                print_success "$display_name is running and healthy"
+                return 0
+            fi
         fi
         
-        if docker-compose exec -T $service_name echo "healthy" >/dev/null 2>&1; then
-            print_success "$display_name is healthy"
-            return 0
-        fi
-        
-
-
-
-        print_status "Waiting for $display_name to be healthy (attempt $attempt/$max_attempts)..."
+        print_status "Waiting for $display_name to be running (attempt $attempt/$max_attempts)..."
         sleep 2
         ((attempt++))
     done
     
-    print_error "$display_name health check failed after $max_attempts attempts"
-    return 1
-}
-
-# Function to check service health
-check_service_health() {
-    local service_name=$1
-    local display_name=$2
-    local max_attempts=30
-    local attempt=1
-
-    print_status "Checking health of $display_name..."
-
-    while [ $attempt -le $max_attempts ]; do
-
-
-
-        print_status "Waiting for $display_name to be healthy (attempt $attempt/$max_attempts)..."
-        sleep 2
-        ((attempt++))
-    done
-    
-    print_warning "$display_name health check timed out, but continuing..."
+    print_warning "$display_name is not running after $max_attempts attempts, but continuing..."
     return 0
 }
 
@@ -269,7 +238,7 @@ show_help() {
     echo "Usage: $0 [COMMAND]"
     echo ""
     echo "Commands:"
-    echo "  start     Start the development environment"
+    echo "  start     Start the development environment (APIs + Infrastructure)"
     echo "  stop      Stop the development environment"
     echo "  restart   Restart the development environment"
     echo "  status    Show service status and health"
@@ -279,6 +248,10 @@ show_help() {
     echo "  rebuild-all       Rebuild all application services"
     echo "  cleanup   Stop services and remove volumes"
     echo "  help      Show this help message"
+    echo ""
+    echo "Note: Azure Functions run locally (not containerized):"
+    echo "  func start  # in src/OrderIntegrationFunction/"
+    echo "  func start --port 7072  # in src/CustomerCommunicationFunction/"
     echo ""
     echo "Examples:"
     echo "  $0 start"
