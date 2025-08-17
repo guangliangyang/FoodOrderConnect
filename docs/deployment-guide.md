@@ -645,7 +645,8 @@ az functionapp logs tail --name $AI_FUNC_NAME --resource-group $RESOURCE_GROUP
 # 本地测试（开发环境）
 echo "🏠 本地环境测试："
 echo "使用 docker-dev.sh 可以轻松测试相同功能："
-echo "./docker-dev.sh start"
+echo "./docker-dev.sh start  # 完整容器化环境"
+echo "# 或者 ./docker-dev.sh infra  # 仅基础设施，本地运行API"
 echo "curl -X POST http://localhost:5001/orders [same-payload]"
 echo "./docker-dev.sh logs customer-communication-function"
 ```

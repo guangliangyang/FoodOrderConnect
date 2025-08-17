@@ -199,8 +199,8 @@ curl -X POST http://localhost:5001/orders \
 ### 方式二：混合开发模式 (推荐开发者)
 
 ```bash
-# 1. 启动基础设施服务 (数据库、缓存等)
-./docker-dev.sh start
+# 1. 启动基础设施服务 (数据库、缓存等，不启动API容器)
+./docker-dev.sh infra
 
 # 2. 在IDE中运行API项目或使用命令行
 dotnet run --project src/ExternalOrderApi    # 终端1
@@ -214,20 +214,26 @@ cd src/CustomerCommunicationFunction && func start --port 7072  # 终端4
 ### 开发工具脚本
 
 ```bash
-# 完整的开发环境管理
-./docker-dev.sh start           # 启动所有服务
+# 🚀 两种开发模式
+./docker-dev.sh infra           # 基础设施模式：仅启动数据库等服务（推荐日常开发）
+./docker-dev.sh start           # 完整模式：启动所有服务包括API容器（推荐演示）
+
+# 📋 环境管理
 ./docker-dev.sh stop            # 停止所有服务
 ./docker-dev.sh restart         # 重启所有服务
 ./docker-dev.sh status          # 查看服务状态和健康检查
 
-# 代码开发和调试
+# 🔧 代码开发和调试
 ./docker-dev.sh rebuild external-order-api  # 重建特定服务（修改代码后）
 ./docker-dev.sh rebuild-all     # 重建所有应用服务
 ./docker-dev.sh logs            # 查看所有服务日志
 ./docker-dev.sh logs external-order-api     # 查看特定服务日志
 
-# 环境清理
+# 🧹 环境清理
 ./docker-dev.sh cleanup         # 完全清理环境
+
+# 📖 帮助信息
+./docker-dev.sh help            # 查看所有可用命令和使用场景
 
 # 传统脚本 (仍然可用)
 ./scripts/health-check.sh       # 详细健康检查

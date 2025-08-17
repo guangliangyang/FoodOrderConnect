@@ -37,9 +37,43 @@ check_docker() {
     fi
 }
 
-# Function to start services
+# Function to start infrastructure services only (for local development)
+start_infrastructure() {
+    print_status "Starting infrastructure services for local development..."
+    check_docker
+    
+    # Start only infrastructure services
+    print_status "Starting infrastructure services..."
+    docker-compose up -d sqlserver redis cosmosdb servicebus otel-collector jaeger prometheus grafana
+    
+    print_status "Waiting for infrastructure services to be healthy..."
+    sleep 30
+    
+    # Check service health
+    check_service_health "sqlserver" "SQL Server"
+    check_service_health "redis" "Redis"
+    check_service_health "servicebus" "Service Bus"
+    
+    print_success "Infrastructure services started successfully!"
+    print_status "Infrastructure services available at:"
+    echo "  - SQL Server: localhost:1433 (sa/BidOne123!)"
+    echo "  - Redis: localhost:6379"
+    echo "  - Cosmos DB Emulator: https://localhost:8081/_explorer/index.html"
+    echo "  - Service Bus: localhost:5672"
+    echo "  - Grafana Dashboard: http://localhost:3000 (admin/admin123)"
+    echo "  - Prometheus: http://localhost:9090"
+    echo "  - Jaeger UI: http://localhost:16686"
+    echo ""
+    print_status "Now you can run your applications locally:"
+    echo "  - External Order API: cd src/ExternalOrderApi && dotnet run"
+    echo "  - Internal System API: cd src/InternalSystemApi && dotnet run"
+    echo "  - Order Function: cd src/OrderIntegrationFunction && func start"
+    echo "  - AI Function: cd src/CustomerCommunicationFunction && func start --port 7072"
+}
+
+# Function to start all services (complete containerized environment)
 start_services() {
-    print_status "Starting BidOne development environment..."
+    print_status "Starting complete BidOne development environment..."
     check_docker
     
     # Start infrastructure services first
@@ -61,8 +95,8 @@ start_services() {
     print_status "Waiting for application services to start..."
     sleep 20
     
-    print_success "Development environment started successfully!"
-    print_status "Services available at:"
+    print_success "Complete development environment started successfully!"
+    print_status "All services available at:"
     echo "  - External Order API: http://localhost:5001"
     echo "  - Internal System API: http://localhost:5002"
     echo "  - Grafana Dashboard: http://localhost:3000 (admin/admin123)"
@@ -237,8 +271,11 @@ show_help() {
     echo ""
     echo "Usage: $0 [COMMAND]"
     echo ""
-    echo "Commands:"
-    echo "  start     Start the development environment (APIs + Infrastructure)"
+    echo "🚀 Development Modes:"
+    echo "  infra     Start infrastructure services only (for local IDE development)"
+    echo "  start     Start complete environment (APIs + Infrastructure)"
+    echo ""
+    echo "📋 Management Commands:"
     echo "  stop      Stop the development environment"
     echo "  restart   Restart the development environment"
     echo "  status    Show service status and health"
@@ -249,20 +286,30 @@ show_help() {
     echo "  cleanup   Stop services and remove volumes"
     echo "  help      Show this help message"
     echo ""
-    echo "Note: Azure Functions run locally (not containerized):"
+    echo "🎯 Usage Scenarios:"
+    echo "  📝 Local Development (Mode 2): ./docker-dev.sh infra"
+    echo "     Then run APIs in your IDE or with 'dotnet run'"
+    echo ""
+    echo "  🏗️ Complete Demo (Mode 1): ./docker-dev.sh start"
+    echo "     Everything runs in containers"
+    echo ""
+    echo "Note: Azure Functions always run locally (not containerized):"
     echo "  func start  # in src/OrderIntegrationFunction/"
     echo "  func start --port 7072  # in src/CustomerCommunicationFunction/"
     echo ""
     echo "Examples:"
-    echo "  $0 start"
-    echo "  $0 logs external-order-api"
-    echo "  $0 rebuild external-order-api"
-    echo "  $0 rebuild-all"
-    echo "  $0 status"
+    echo "  $0 infra                    # Start infrastructure for local development"
+    echo "  $0 start                    # Start complete containerized environment"
+    echo "  $0 logs external-order-api  # View API logs"
+    echo "  $0 rebuild external-order-api  # Rebuild after code changes"
+    echo "  $0 status                   # Check all service health"
 }
 
 # Main script logic
 case "${1:-}" in
+    infra)
+        start_infrastructure
+        ;;
     start)
         start_services
         ;;
@@ -291,9 +338,15 @@ case "${1:-}" in
         show_help
         ;;
     *)
-        print_error "Unknown command: ${1:-}"
-        echo ""
-        show_help
-        exit 1
+        if [ -z "${1:-}" ]; then
+            print_warning "No command specified. Showing help:"
+            echo ""
+            show_help
+        else
+            print_error "Unknown command: ${1:-}"
+            echo ""
+            show_help
+            exit 1
+        fi
         ;;
 esac

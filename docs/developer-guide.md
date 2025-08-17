@@ -175,7 +175,7 @@ curl -X POST http://localhost:5001/orders \
 
 ```bash
 # 1. 启动基础设施服务（数据库、缓存等）
-./docker-dev.sh start
+./docker-dev.sh infra
 
 # 2. 等待服务就绪
 # 脚本会自动检查服务状态
