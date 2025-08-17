@@ -17,10 +17,17 @@ echo "✅ Redis is ready"
 
 # Wait for SQL Server
 echo "Waiting for SQL Server..."
-until docker exec bidone-sql-dev /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P BidOne123! -Q "SELECT 1"  -C > /dev/null 2>&1; do
+until docker exec bidone-sql-dev /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P BidOne123! -Q "SELECT 1" -C -N > /dev/null 2>&1; do
     sleep 5
 done
 echo "✅ SQL Server is ready"
+
+# Wait for Cosmos DB
+echo "Waiting for Cosmos DB..."
+until curl -k -f https://localhost:8081/_explorer/emulator.pem > /dev/null 2>&1; do
+    sleep 10
+done
+echo "✅ Cosmos DB is ready"
 
 echo "🎉 All services are ready!"
 echo ""
