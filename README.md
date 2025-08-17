@@ -124,15 +124,15 @@ git clone <repository-url>
 cd FoodOrderConnect
 
 # 2. 启动完整开发环境 (包含 AI 智能沟通系统)
-docker-compose up -d
+./docker-dev.sh start
 
 # 3. 验证服务状态
-docker-compose ps
+./docker-dev.sh status
 
 # 4. 访问服务
-echo "External Order API: http://localhost:8080"
-echo "Internal System API: http://localhost:8081"  
-echo "Grafana Dashboard: http://localhost:3000 (admin/admin)"
+echo "External Order API: http://localhost:5001"
+echo "Internal System API: http://localhost:5002"  
+echo "Grafana Dashboard: http://localhost:3000 (admin/admin123)"
 echo "Prometheus: http://localhost:9090"
 ```
 
@@ -160,7 +160,7 @@ az keyvault secret set \
 
 ```bash
 # 发送正常订单
-curl -X POST http://localhost:8080/orders \
+curl -X POST http://localhost:5001/orders \
   -H "Content-Type: application/json" \
   -d '{
     "customerId": "customer-001",
@@ -169,7 +169,7 @@ curl -X POST http://localhost:8080/orders \
   }'
 
 # 触发 AI 智能错误处理 (高价值订单错误)
-curl -X POST http://localhost:8080/orders \
+curl -X POST http://localhost:5001/orders \
   -H "Content-Type: application/json" \
   -d '{
     "customerId": "premium-customer-001",
@@ -178,7 +178,7 @@ curl -X POST http://localhost:8080/orders \
   }'
 
 # 观察 AI 处理日志
-docker-compose logs customer-communication-function -f
+./docker-dev.sh logs customer-communication-function
 ```
 
 ## 🛠️ 开发环境运行
@@ -187,20 +187,20 @@ docker-compose logs customer-communication-function -f
 
 ```bash
 # 一键启动完整系统
-docker-compose up -d
+./docker-dev.sh start
 
-# 检查服务状态
-./scripts/health-check.sh
+# 检查服务状态  
+./docker-dev.sh status
 
 # 查看服务日志
-./scripts/view-logs.sh external-api -f
+./docker-dev.sh logs external-order-api
 ```
 
 ### 方式二：混合开发模式 (推荐开发者)
 
 ```bash
-# 1. 启动基础设施服务
-./scripts/start-local-services.sh
+# 1. 启动基础设施服务 (数据库、缓存等)
+./docker-dev.sh start
 
 # 2. 在IDE中运行API项目或使用命令行
 dotnet run --project src/ExternalOrderApi    # 终端1
@@ -214,22 +214,25 @@ cd src/CustomerCommunicationFunction && func start --port 7072  # 终端4
 ### 开发工具脚本
 
 ```bash
-# 健康检查
-./scripts/health-check.sh                    # 检查所有服务
-./scripts/health-check.sh --wait             # 等待服务就绪
+# 完整的开发环境管理
+./docker-dev.sh start           # 启动所有服务
+./docker-dev.sh stop            # 停止所有服务
+./docker-dev.sh restart         # 重启所有服务
+./docker-dev.sh status          # 查看服务状态和健康检查
 
-# 日志查看
-./scripts/view-logs.sh external-api          # 查看API日志
-./scripts/view-logs.sh -f redis              # 实时跟踪Redis日志
-./scripts/view-logs.sh --grep "ERROR" all    # 查看所有错误日志
+# 代码开发和调试
+./docker-dev.sh rebuild external-order-api  # 重建特定服务（修改代码后）
+./docker-dev.sh rebuild-all     # 重建所有应用服务
+./docker-dev.sh logs            # 查看所有服务日志
+./docker-dev.sh logs external-order-api     # 查看特定服务日志
 
-# 构建和测试
-./scripts/build-all.sh                       # 构建所有项目
-dotnet test                                   # 运行测试
+# 环境清理
+./docker-dev.sh cleanup         # 完全清理环境
 
-# 停止服务
-./scripts/stop-local-services.sh             # 停止开发服务
-docker-compose down                          # 停止完整环境
+# 传统脚本 (仍然可用)
+./scripts/health-check.sh       # 详细健康检查
+./scripts/view-logs.sh redis -f # 查看特定服务日志
+dotnet test                     # 运行测试
 ```
 
 **详细开发指南**: 查看 [开发者运行指南](docs/developer-guide.md)
@@ -304,10 +307,10 @@ docker-compose down                          # 停止完整环境
 ### 🔍 实时监控端点
 | 服务 | 健康检查 | 监控仪表板 |
 |------|----------|------------|
-| **External Order API** | `http://localhost:8080/health` | Grafana Business Metrics |
-| **Internal System API** | `http://localhost:8081/health` | Application Insights |
+| **External Order API** | `http://localhost:5001/health` | Grafana Business Metrics |
+| **Internal System API** | `http://localhost:5002/health` | Application Insights |
 | **AI Communication Function** | Azure Functions Portal | Service Bus Metrics |
-| **系统总览** | `./scripts/health-check.sh` | `http://localhost:3000` |
+| **系统总览** | `./docker-dev.sh status` | `http://localhost:3000` |
 
 ### 📈 关键性能指标 (KPIs)
 | 指标 | 目标值 | 当前实现 |

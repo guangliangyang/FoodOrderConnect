@@ -55,7 +55,6 @@ usage() {
     echo "Options:"
     echo "  -f, --follow          Follow log output (like tail -f)"
     echo "  -n, --lines NUMBER    Number of lines to show (default: $DEFAULT_LINES)"
-    echo "  --dev                 Use development environment containers"
     echo "  --full                Use full environment containers"
     echo "  --since DURATION      Show logs since duration (e.g., 1h, 30m, 2h30m)"
     echo "  --grep PATTERN        Filter logs by pattern"
@@ -67,7 +66,7 @@ usage() {
     echo "  $0 -n 100 internal-api           # Show last 100 lines of internal API logs"
     echo "  $0 --since 1h all                # Show all logs from last hour"
     echo "  $0 --grep 'ERROR' external-api   # Show only error logs from external API"
-    echo "  $0 --dev redis                   # Show Redis logs from dev environment"
+    echo "  $0 --full redis                  # Show Redis logs from full environment"
 }
 
 # Get container name for service
@@ -101,46 +100,22 @@ get_container_name() {
             fi
             ;;
         "sqlserver")
-            if [ "$environment" = "dev" ]; then
-                echo "bidone-sql-dev"
-            else
-                echo "bidone-sqlserver"
-            fi
+            echo "bidone-sqlserver"
             ;;
         "redis")
-            if [ "$environment" = "dev" ]; then
-                echo "bidone-redis-dev"
-            else
-                echo "bidone-redis"
-            fi
+            echo "bidone-redis"
             ;;
         "cosmosdb")
-            if [ "$environment" = "dev" ]; then
-                echo "bidone-cosmos-dev"
-            else
-                echo "bidone-cosmosdb"
-            fi
+            echo "bidone-cosmosdb"
             ;;
         "servicebus")
-            if [ "$environment" = "dev" ]; then
-                echo "bidone-servicebus-dev"
-            else
-                echo "bidone-servicebus"
-            fi
+            echo "bidone-servicebus"
             ;;
         "prometheus")
-            if [ "$environment" = "dev" ]; then
-                echo "bidone-prometheus-dev"
-            else
-                echo "bidone-prometheus"
-            fi
+            echo "bidone-prometheus"
             ;;
         "grafana")
-            if [ "$environment" = "dev" ]; then
-                echo "bidone-grafana-dev"
-            else
-                echo "bidone-grafana"
-            fi
+            echo "bidone-grafana"
             ;;
         "nginx")
             echo "bidone-nginx"
@@ -235,13 +210,7 @@ show_all_logs() {
         return 1
     fi
     
-    local services=()
-    
-    if [ "$environment" = "dev" ]; then
-        services=("redis" "sqlserver" "cosmosdb" "servicebus" "prometheus" "grafana")
-    else
-        services=("external-api" "internal-api" "sqlserver" "redis" "cosmosdb" "servicebus" "prometheus" "grafana" "nginx")
-    fi
+    local services=("external-api" "internal-api" "sqlserver" "redis" "cosmosdb" "servicebus" "prometheus" "grafana" "nginx")
     
     for service in "${services[@]}"; do
         local container_name=$(get_container_name "$service" "$environment")
@@ -261,8 +230,8 @@ show_all_logs() {
 detect_environment() {
     if docker ps --format "table {{.Names}}" | grep -q "bidone-external-api"; then
         echo "full"
-    elif docker ps --format "table {{.Names}}" | grep -q "bidone-.*-dev"; then
-        echo "dev"
+    elif docker ps --format "table {{.Names}}" | grep -q "bidone-redis"; then
+        echo "full"
     else
         echo "unknown"
     fi
@@ -295,10 +264,6 @@ main() {
             --grep)
                 grep_pattern="$2"
                 shift 2
-                ;;
-            --dev)
-                environment="dev"
-                shift
                 ;;
             --full)
                 environment="full"

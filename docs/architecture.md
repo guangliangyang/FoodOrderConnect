@@ -140,32 +140,6 @@ sequenceDiagram
     Note over AI,Notify: 整个流程 < 5秒完成
     Note over LC,OpenAI: 支持优雅降级到智能模拟
 ```
-        SQL[Azure SQL Database]
-        Cosmos[Azure Cosmos DB]
-        Redis[Azure Cache for Redis]
-    end
-    
-    subgraph "监控层"
-        AppInsights[Application Insights]
-        Monitor[Azure Monitor]
-        LogAnalytics[Log Analytics]
-    end
-    
-    Client --> APIM
-    APIM --> ExtAPI
-    ExtAPI --> ServiceBus
-    ServiceBus --> LogicApp
-    LogicApp --> Functions
-    Functions --> IntAPI
-    IntAPI --> SQL
-    IntAPI --> Cosmos
-    Functions --> Redis
-    
-    ExtAPI --> AppInsights
-    IntAPI --> AppInsights
-    Functions --> AppInsights
-    LogicApp --> Monitor
-```
 
 ## 核心组件详细设计
 

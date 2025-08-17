@@ -25,11 +25,14 @@
 
 #### 1.1 本地开发环境
 ```bash
-# 启动完整的本地环境
-docker-compose up -d
+# 启动完整的本地环境（推荐方式）
+./docker-dev.sh start
 
-# 展示服务状态
-docker-compose ps
+# 展示服务状态和健康检查
+./docker-dev.sh status
+
+# 查看实时日志
+./docker-dev.sh logs
 ```
 
 **展示要点：**
@@ -50,8 +53,8 @@ docker-compose ps
 
 #### 1.1 创建订单
 ```bash
-# 发送标准订单请求
-curl -X POST https://your-api-gateway/external/orders \
+# 本地开发环境测试
+curl -X POST http://localhost:5001/orders \
   -H "Content-Type: application/json" \
   -d '{
     "customerId": "customer-001",
@@ -63,6 +66,10 @@ curl -X POST https://your-api-gateway/external/orders \
     "deliveryDate": "2024-12-20T10:00:00Z",
     "notes": "Please deliver to main reception"
   }'
+
+# Azure 云环境测试
+# curl -X POST https://your-api-gateway/external/orders \
+#   [same payload as above]
 ```
 
 #### 1.2 追踪处理流程
@@ -84,8 +91,8 @@ curl -X POST https://your-api-gateway/external/orders \
 #### 2.1 触发高价值错误
 
 ```bash
-# 发送会触发验证错误的高价值订单
-curl -X POST https://your-api-gateway/external/orders \
+# 本地环境 - 触发AI智能错误处理
+curl -X POST http://localhost:5001/orders \
   -H "Content-Type: application/json" \
   -d '{
     "customerId": "premium-customer-001",
@@ -96,6 +103,13 @@ curl -X POST https://your-api-gateway/external/orders \
     }],
     "deliveryDate": "2024-12-20T10:00:00Z"
   }'
+
+# 实时观察AI处理日志
+./docker-dev.sh logs customer-communication-function
+
+# Azure 云环境
+# curl -X POST https://your-api-gateway/external/orders \
+#   [same payload as above]
 ```
 
 #### 2.2 AI 自动化沟通流程展示
@@ -270,16 +284,17 @@ by bin(timestamp, 5m)
 ## 📝 演示检查清单
 
 ### 准备工作
-- [ ] 确认所有服务运行正常
-- [ ] 验证 AI 功能配置（OpenAI API 或模拟模式）
+- [ ] 确认所有服务运行正常：`./docker-dev.sh status`
+- [ ] 验证 AI 功能配置（OpenAI API 或智能模拟模式）
 - [ ] 准备演示数据和脚本
-- [ ] 检查监控仪表板显示
+- [ ] 检查监控仪表板显示：http://localhost:3000
 
 ### 演示环境
-- [ ] 本地 Docker 环境就绪
-- [ ] Azure 云环境就绪  
+- [ ] 本地 Docker 环境就绪：`./docker-dev.sh start`
+- [ ] Azure 云环境就绪（可选）
 - [ ] 网络连接稳定
 - [ ] 演示脚本和 curl 命令准备好
+- [ ] 开发管理脚本功能验证：`./docker-dev.sh help`
 
 ### 展示内容
 - [ ] 技术架构图清晰展示

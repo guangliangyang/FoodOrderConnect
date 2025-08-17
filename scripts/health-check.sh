@@ -128,32 +128,32 @@ check_dev_environment() {
     local all_healthy=true
     
     # Check Docker containers
-    if ! check_container "bidone-redis-dev" "Redis"; then
+    if ! check_container "bidone-redis" "Redis"; then
         all_healthy=false
     fi
     
-    if ! check_container "bidone-sql-dev" "SQL Server"; then
+    if ! check_container "bidone-sqlserver" "SQL Server"; then
         all_healthy=false
     fi
     
-    if ! check_container "bidone-cosmos-dev" "Cosmos DB"; then
+    if ! check_container "bidone-cosmosdb" "Cosmos DB"; then
         all_healthy=false
     fi
     
-    if ! check_container "bidone-azurite-dev" "Azurite"; then
+    if ! check_container "bidone-azurite" "Azurite"; then
         all_healthy=false
     fi
     
     # Check optional containers
-    if check_container "bidone-servicebus-dev" "Service Bus" 2>/dev/null; then
+    if check_container "bidone-servicebus" "Service Bus" 2>/dev/null; then
         :  # Service Bus container exists
     fi
     
-    if check_container "bidone-prometheus-dev" "Prometheus" 2>/dev/null; then
+    if check_container "bidone-prometheus" "Prometheus" 2>/dev/null; then
         :  # Prometheus container exists
     fi
     
-    if check_container "bidone-grafana-dev" "Grafana" 2>/dev/null; then
+    if check_container "bidone-grafana" "Grafana" 2>/dev/null; then
         :  # Grafana container exists
     fi
     
@@ -172,7 +172,7 @@ check_dev_environment() {
     fi
     
     # Check SQL Server
-    if docker exec bidone-sql-dev /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P 'BidOne123!' -Q "SELECT 1" -C -N >/dev/null 2>&1; then
+    if docker exec bidone-sqlserver /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P 'BidOne123!' -Q "SELECT 1" -C -N >/dev/null 2>&1; then
         log_success "SQL Server is responding"
     else
         log_error "SQL Server is not accessible"
@@ -287,7 +287,7 @@ main() {
                 echo "  --wait    Wait for services to become ready"
                 echo "  --help    Show this help message"
                 echo ""
-                echo "Default: Check development environment (docker-compose.dev.yml)"
+                echo "Default: Check complete environment (docker-compose.yml)"
                 exit 0
                 ;;
             *)
@@ -324,11 +324,11 @@ main() {
             fi
         else
             # Wait for development services
-            if ! wait_for_service check_container "Redis" $MAX_WAIT_TIME "bidone-redis-dev" "Redis"; then
+            if ! wait_for_service check_container "Redis" $MAX_WAIT_TIME "bidone-redis" "Redis"; then
                 all_healthy=false
             fi
             
-            if ! wait_for_service check_container "SQL Server" $MAX_WAIT_TIME "bidone-sql-dev" "SQL Server"; then
+            if ! wait_for_service check_container "SQL Server" $MAX_WAIT_TIME "bidone-sqlserver" "SQL Server"; then
                 all_healthy=false
             fi
         fi
@@ -363,10 +363,10 @@ main() {
             echo "  🗄️  SQL Server: localhost:1433 (sa/BidOne123!)"
             echo "  🌍 Cosmos DB: https://localhost:8081"
             echo "  📦 Azurite: localhost:10000 (blob), localhost:10001 (queue)"
-            if docker ps --format "table {{.Names}}" | grep -q "bidone-grafana-dev"; then
-                echo "  📊 Grafana: http://localhost:3000 (admin/admin)"
+            if docker ps --format "table {{.Names}}" | grep -q "bidone-grafana"; then
+                echo "  📊 Grafana: http://localhost:3000 (admin/admin123)"
             fi
-            if docker ps --format "table {{.Names}}" | grep -q "bidone-prometheus-dev"; then
+            if docker ps --format "table {{.Names}}" | grep -q "bidone-prometheus"; then
                 echo "  📈 Prometheus: http://localhost:9090"
             fi
         fi

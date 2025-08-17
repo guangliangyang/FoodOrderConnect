@@ -165,7 +165,7 @@ version: '3.8'
 services:
   redis:
     image: redis:7-alpine
-    container_name: bidone-redis-dev
+    container_name: bidone-redis
     ports:
       - "6379:6379"
     command: redis-server --appendonly yes
@@ -179,7 +179,7 @@ services:
 
   sqlserver:
     image: mcr.microsoft.com/mssql/server:2022-latest
-    container_name: bidone-sql-dev
+    container_name: bidone-sqlserver
     environment:
       - ACCEPT_EULA=Y
       - SA_PASSWORD=BidOne123!
@@ -196,7 +196,7 @@ services:
 
   cosmosdb:
     image: mcr.microsoft.com/cosmosdb/linux/azure-cosmos-emulator:latest
-    container_name: bidone-cosmos-dev
+    container_name: bidone-cosmosdb
     environment:
       - AZURE_COSMOS_EMULATOR_PARTITION_COUNT=10
       - AZURE_COSMOS_EMULATOR_ENABLE_DATA_PERSISTENCE=true
@@ -216,7 +216,7 @@ services:
 
   azurite:
     image: mcr.microsoft.com/azure-storage/azurite:latest
-    container_name: bidone-azurite-dev
+    container_name: bidone-azurite
     ports:
       - "10000:10000"
       - "10001:10001"
@@ -257,14 +257,14 @@ echo "⏳ Waiting for services to be ready..."
 
 # Wait for Redis
 echo "Waiting for Redis..."
-until docker exec bidone-redis-dev redis-cli ping > /dev/null 2>&1; do
+until docker exec bidone-redis redis-cli ping > /dev/null 2>&1; do
     sleep 2
 done
 echo "✅ Redis is ready"
 
 # Wait for SQL Server
 echo "Waiting for SQL Server..."
-until docker exec bidone-sql-dev /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P BidOne123! -Q "SELECT 1" > /dev/null 2>&1; do
+until docker exec bidone-sqlserver /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P BidOne123! -Q "SELECT 1" > /dev/null 2>&1; do
     sleep 5
 done
 echo "✅ SQL Server is ready"

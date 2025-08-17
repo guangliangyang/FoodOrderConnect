@@ -641,6 +641,13 @@ curl -X POST "https://$EXTERNAL_API_URL/orders" \
 
 echo "检查AI Function日志："
 az functionapp logs tail --name $AI_FUNC_NAME --resource-group $RESOURCE_GROUP
+
+# 本地测试（开发环境）
+echo "🏠 本地环境测试："
+echo "使用 docker-dev.sh 可以轻松测试相同功能："
+echo "./docker-dev.sh start"
+echo "curl -X POST http://localhost:5001/orders [same-payload]"
+echo "./docker-dev.sh logs customer-communication-function"
 ```
 
 ## 📊 监控和维护
@@ -776,28 +783,46 @@ az consumption budget create \
 
 ## 📋 部署检查清单
 
-### 部署前检查
+### 🏠 本地开发环境
+- [ ] Docker Desktop已安装并运行
+- [ ] .NET 8.0 SDK已安装
+- [ ] 项目代码已克隆
+- [ ] `./docker-dev.sh start` 执行成功
+- [ ] 服务健康检查通过：`./docker-dev.sh status`
+- [ ] AI功能测试正常（模拟模式或真实OpenAI）
+
+### ☁️ Azure部署前检查
 - [ ] Azure CLI已安装并登录
-- [ ] 订阅权限确认
+- [ ] 订阅权限确认（贡献者角色）
 - [ ] 资源组创建
 - [ ] 参数文件配置
-- [ ] OpenAI API Key准备（可选）
+- [ ] OpenAI API Key准备（可选，否则使用智能模拟）
+- [ ] 本地环境验证通过
 
-### 部署过程检查
-- [ ] 基础设施部署成功
-- [ ] 容器镜像构建和推送
-- [ ] Container Apps部署
-- [ ] Azure Functions部署
-- [ ] 数据库初始化
-- [ ] 配置和密钥设置
+### 🚀 部署过程检查
+- [ ] 基础设施部署成功（Bicep模板）
+- [ ] 容器镜像构建和推送到ACR
+- [ ] Container Apps部署成功
+- [ ] Azure Functions部署成功
+- [ ] 数据库初始化完成
+- [ ] Key Vault配置和密钥设置
+- [ ] Service Bus和Event Grid配置
 
-### 部署后验证
+### ✅ 部署后验证
 - [ ] API健康检查通过
 - [ ] 数据库连接正常
-- [ ] AI功能测试
-- [ ] 监控和日志配置
-- [ ] 告警规则设置
-- [ ] 安全配置确认
+- [ ] Service Bus消息流验证
+- [ ] AI功能端到端测试
+- [ ] Application Insights监控数据
+- [ ] 日志聚合和查询正常
+- [ ] 告警规则触发测试
+- [ ] 安全配置和访问控制确认
+
+### 🔄 开发工作流验证
+- [ ] 本地开发环境可重现生产问题
+- [ ] `docker-dev.sh rebuild` 功能正常
+- [ ] CI/CD流水线配置（如使用GitHub Actions）
+- [ ] 回滚计划准备
 
 ## 🎯 下一步
 

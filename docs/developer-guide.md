@@ -219,10 +219,10 @@ func start --port 7072
 ./scripts/view-logs.sh sqlserver -f
 
 # 进入数据库查看数据
-docker exec -it bidone-sql-dev /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P BidOne123! -C -N
+docker exec -it bidone-sqlserver /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P BidOne123! -C -N
 
 # 查看Redis数据
-docker exec -it bidone-redis-dev redis-cli
+docker exec -it bidone-redis redis-cli
 
 # 重启单个服务
 docker-compose restart redis
@@ -376,7 +376,7 @@ docker system prune -f
 
 ```bash
 # 检查SQL Server状态
-docker exec bidone-sql-dev /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P BidOne123! -Q "SELECT 1" -C -N
+docker exec bidone-sqlserver /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P BidOne123! -Q "SELECT 1" -C -N
 
 # 使用开发脚本重启（推荐）
 ./docker-dev.sh restart
