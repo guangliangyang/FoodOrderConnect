@@ -22,7 +22,8 @@
 - **端口**: 确保以下端口未被占用：
   - 1433 (SQL Server)
   - 6379 (Redis)
-  - 8080-8081 (APIs & Cosmos DB)
+  - 8080-8081 (APIs), 8081 (Cosmos DB)
+  - 10000-10254 (Azurite & Cosmos DB additional ports)
   - 3000, 9090 (Grafana, Prometheus)
   - 5672 (Service Bus)
 
@@ -79,6 +80,7 @@ docker-compose logs -f external-order-api
 | **SQL Server** | localhost:1433 | 数据库 (sa/BidOne123!) |
 | **Redis** | localhost:6379 | 缓存服务 |
 | **Cosmos DB** | https://localhost:8081 | 文档数据库模拟器 |
+| **Azurite** | http://localhost:10000 | Azure Storage模拟器 |
 
 #### 测试命令
 
@@ -167,8 +169,8 @@ func start --port 7072
 
 ```bash
 # 查看特定服务日志
-docker-compose -f docker-compose.dev.yml logs -f redis
-docker-compose -f docker-compose.dev.yml logs -f sqlserver
+./scripts/view-logs.sh redis -f
+./scripts/view-logs.sh sqlserver -f
 
 # 进入数据库查看数据
 docker exec -it bidone-sql-dev /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P BidOne123! -C -N
@@ -177,7 +179,7 @@ docker exec -it bidone-sql-dev /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa 
 docker exec -it bidone-redis-dev redis-cli
 
 # 重启单个服务
-docker-compose -f docker-compose.dev.yml restart redis
+docker-compose restart redis
 ```
 
 ### 模式三：纯本地开发模式 (高级开发者)
@@ -319,7 +321,7 @@ docker exec bidone-sql-dev /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P B
 
 # 重置数据库
 docker-compose restart sqlserver
-# 等待30秒后重试
+sleep 30  # 等待数据库完全启动
 ```
 
 ### 4. AI功能不工作
@@ -341,7 +343,7 @@ curl http://localhost:9090/api/v1/targets
 # 重启Grafana
 docker-compose restart grafana
 
-# 访问 http://localhost:3000，账号: admin/admin
+# 访问 http://localhost:3000，账号: admin/admin123
 ```
 
 ## 📝 开发最佳实践
@@ -423,7 +425,7 @@ dotnet clean
 rm -rf **/bin **/obj
 
 # 重新开始
-./scripts/setup-dev-env.sh  # 如果需要
+# 重新初始化开发环境（如果需要）
 ./scripts/start-local-services.sh
 ```
 
