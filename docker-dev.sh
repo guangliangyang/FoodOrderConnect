@@ -139,7 +139,7 @@ start_services() {
     
     # Start application services
     print_status "Starting application services..."
-    docker-compose up -d external-order-api internal-system-api nginx
+    docker-compose up -d external-order-api internal-system-api order-integration-function customer-communication-function nginx
     
     print_status "Waiting for application services to start..."
     sleep 20
@@ -148,15 +148,15 @@ start_services() {
     print_status "All services available at:"
     echo "  - External Order API: http://localhost:5001"
     echo "  - Internal System API: http://localhost:5002"
+    echo "  - Order Integration Function: http://localhost:7071"
+    echo "  - Customer Communication Function: http://localhost:7072"
     echo "  - Grafana Dashboard: http://localhost:3000 (admin/admin123)"
     echo "  - Prometheus: http://localhost:9090"
     echo "  - Jaeger UI: http://localhost:16686"
     echo "  - Cosmos DB Emulator: https://localhost:8081/_explorer/index.html"
     echo "  - Azurite Storage: localhost:10000 (blob), localhost:10001 (queue)"
     echo ""
-    print_warning "Azure Functions are not containerized. To start them locally:"
-    echo "  - cd src/OrderIntegrationFunction && func start"
-    echo "  - cd src/CustomerCommunicationFunction && func start --port 7072"
+    print_success "🎉 All microservices are now containerized and running!"
 }
 
 # Function to stop services
@@ -179,7 +179,7 @@ rebuild_service() {
     
     if [ -z "$service" ]; then
         print_error "Service name is required for rebuild command"
-        echo "Available services: external-order-api, internal-system-api"
+        echo "Available services: external-order-api, internal-system-api, order-integration-function, customer-communication-function"
         exit 1
     fi
     
@@ -205,6 +205,10 @@ rebuild_service() {
         check_endpoint "http://localhost:5001/health" "External Order API"
     elif [ "$service" = "internal-system-api" ]; then
         check_endpoint "http://localhost:5002/health" "Internal System API"
+    elif [ "$service" = "order-integration-function" ]; then
+        check_endpoint "http://localhost:7071" "Order Integration Function"
+    elif [ "$service" = "customer-communication-function" ]; then
+        check_endpoint "http://localhost:7072" "Customer Communication Function"
     fi
     
     print_success "$service rebuilt and restarted successfully!"
@@ -215,23 +219,25 @@ rebuild_all() {
     print_status "Rebuilding all application services..."
     
     # Stop application services
-    docker-compose stop external-order-api internal-system-api
+    docker-compose stop external-order-api internal-system-api order-integration-function customer-communication-function
     
     # Remove containers
-    docker-compose rm -f external-order-api internal-system-api
+    docker-compose rm -f external-order-api internal-system-api order-integration-function customer-communication-function
     
     # Rebuild images
     print_status "Rebuilding application images..."
-    docker-compose build --no-cache external-order-api internal-system-api
+    docker-compose build --no-cache external-order-api internal-system-api order-integration-function customer-communication-function
     
     # Start services
     print_status "Starting application services..."
-    docker-compose up -d external-order-api internal-system-api nginx
+    docker-compose up -d external-order-api internal-system-api order-integration-function customer-communication-function nginx
     
     # Wait and check health
     sleep 20
     check_endpoint "http://localhost:5001/health" "External Order API"
     check_endpoint "http://localhost:5002/health" "Internal System API"
+    check_endpoint "http://localhost:7071" "Order Integration Function"
+    check_endpoint "http://localhost:7072" "Customer Communication Function"
     
     print_success "All application services rebuilt and restarted successfully!"
 }
@@ -290,6 +296,8 @@ show_status() {
     # Check if services are responding
     check_endpoint "http://localhost:5001/health" "External Order API"
     check_endpoint "http://localhost:5002/health" "Internal System API"
+    check_endpoint "http://localhost:7071" "Order Integration Function"
+    check_endpoint "http://localhost:7072" "Customer Communication Function"
     check_endpoint "http://localhost:3000" "Grafana"
     check_endpoint "http://localhost:9090" "Prometheus"
     check_endpoint "http://localhost:16686" "Jaeger"
@@ -427,9 +435,7 @@ show_help() {
     echo "  🏗️ Complete Demo (Mode 1): ./docker-dev.sh start"
     echo "     Everything runs in containers"
     echo ""
-    echo "Note: Azure Functions always run locally (not containerized):"
-    echo "  func start  # in src/OrderIntegrationFunction/"
-    echo "  func start --port 7072  # in src/CustomerCommunicationFunction/"
+    echo "🎉 All services including Azure Functions are now containerized!"
     echo ""
     echo "Examples:"
     echo "  $0 infra                    # Start infrastructure for local development"

@@ -6,6 +6,7 @@ using BidOne.Shared.Events;
 using BidOne.Shared.Metrics;
 using BidOne.Shared.Models;
 using BidOne.Shared.Services;
+using BidOne.Shared.Domain.ValueObjects;
 using Microsoft.EntityFrameworkCore;
 
 namespace BidOne.InternalSystemApi.Services;
@@ -45,12 +46,12 @@ public class OrderProcessingService : IOrderProcessingService
         try
         {
             _logger.LogInformation("Processing order {OrderId} for customer {CustomerId}",
-                request.Order.Id, request.Order.CustomerId);
+                request.Order.Id.Value, request.Order.CustomerId.Value);
 
             // Check if order already exists
             var existingOrder = await _dbContext.Orders
                 .Include(o => o.Items)
-                .FirstOrDefaultAsync(o => o.Id == request.Order.Id, cancellationToken);
+                .FirstOrDefaultAsync(o => o.Id == request.Order.Id.Value, cancellationToken);
 
             OrderEntity orderEntity;
 
@@ -58,7 +59,7 @@ public class OrderProcessingService : IOrderProcessingService
             {
                 // Create new order
                 orderEntity = _mapper.Map<OrderEntity>(request);
-                orderEntity.Id = request.Order.Id;
+                orderEntity.Id = request.Order.Id.Value;
                 orderEntity.Status = OrderStatus.Processing;
                 orderEntity.UpdatedAt = DateTime.UtcNow;
 
@@ -68,12 +69,16 @@ public class OrderProcessingService : IOrderProcessingService
                     var itemEntity = _mapper.Map<OrderItemEntity>(item);
                     itemEntity.Id = Guid.NewGuid();
                     itemEntity.OrderId = orderEntity.Id;
-                    itemEntity.TotalPrice = item.Quantity * item.UnitPrice;
+                    itemEntity.ProductId = item.ProductInfo.ProductId;
+                    itemEntity.ProductName = item.ProductInfo.ProductName;
+                    itemEntity.Quantity = item.Quantity.Value;
+                    itemEntity.UnitPrice = item.UnitPrice.Amount;
+                    itemEntity.TotalPrice = item.GetTotalPrice().Amount;
                     return itemEntity;
                 }).ToList();
 
                 // Calculate total amount
-                orderEntity.TotalAmount = orderEntity.Items.Sum(i => i.TotalPrice);
+                orderEntity.TotalAmount = request.Order.TotalAmount.Amount;
 
                 await _dbContext.Orders.AddAsync(orderEntity, cancellationToken);
             }
@@ -198,7 +203,7 @@ public class OrderProcessingService : IOrderProcessingService
             // 📊 记录失败指标
             BusinessMetrics.OrdersProcessed.WithLabels("failed", "InternalSystemApi").Inc();
 
-            _logger.LogError(ex, "Failed to process order {OrderId}", request.Order.Id);
+            _logger.LogError(ex, "Failed to process order {OrderId}", request.Order.Id.Value);
             throw;
         }
     }

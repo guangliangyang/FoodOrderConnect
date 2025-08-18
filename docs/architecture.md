@@ -19,6 +19,8 @@ BidOne Integration Platform 是一个展示**现代云原生架构与 AI 智能�
 - **🏗️ 微服务架构**: 服务解耦和独立部署  
 - **🧠 AI 集成模式**: LangChain + OpenAI 智能处理
 - **📦 容器化部署**: Docker + Azure Container Apps
+- **🎯 领域驱动设计 (DDD)**: 富领域模型 + 聚合根 + 值对象
+- **📋 领域事件**: 业务事件驱动的松耦合通信
 - **🔄 CQRS + 事件溯源**: 命令查询分离和事件存储
 
 ## 🏗️ 系统架构图
@@ -164,19 +166,36 @@ public async Task<IActionResult> CreateOrder([FromBody] CreateOrderRequest reque
     if (!validationResult.IsValid)
         return BadRequest(validationResult.Errors);
     
-    // 2. 转换为领域模型
-    var order = _mapper.Map<Order>(request);
+    // 2. 使用领域模型工厂方法创建订单
+    var order = Order.Create(CustomerId.Create(request.CustomerId));
     
-    // 3. 发送到消息队列
+    // 3. 使用领域方法添加订单项
+    foreach (var item in request.Items)
+    {
+        var productInfo = ProductInfo.Create(item.ProductId, item.ProductId);
+        var quantity = Quantity.Create(item.Quantity);
+        var unitPrice = Money.Create(item.UnitPrice);
+        
+        order.AddItem(productInfo, quantity, unitPrice);
+    }
+    
+    // 4. 设置配送信息
+    order.UpdateDeliveryInfo(request.DeliveryDate, null);
+    order.SetNotes(request.Notes);
+    
+    // 5. 发送到消息队列 (领域事件会自动生成)
     await _serviceBusPublisher.PublishAsync(order);
     
-    // 4. 返回确认
-    return Accepted(new { OrderId = order.Id, Status = "Received" });
+    // 6. 返回确认
+    return Accepted(new { OrderId = order.Id.Value, Status = order.Status });
 }
 ```
 
 **关键设计决策**:
 - **快速响应**: 立即返回确认，异步处理降低响应时间
+- **领域驱动**: 使用富领域模型封装业务逻辑和规则
+- **类型安全**: 强类型值对象防止原始类型混淆
+- **事件驱动**: 领域事件自动记录业务活动
 - **幂等性**: 支持重复提交检测
 - **限流保护**: 集成 API Management 限流策略
 
@@ -295,19 +314,239 @@ public async Task<IActionResult> ProcessOrder([FromBody] ProcessOrderRequest req
 ```csharp
 public class Order : AggregateRoot
 {
-    public OrderId Id { get; private set; }
-    public CustomerId CustomerId { get; private set; }
-    public SupplierId SupplierId { get; private set; }
-    public List<OrderItem> Items { get; private set; }
-    public OrderStatus Status { get; private set; }
-    public DateTime CreatedAt { get; private set; }
-    public DateTime? ConfirmedAt { get; private set; }
+    public OrderId Id { get; set; }
+    public CustomerId CustomerId { get; set; }
+    public string CustomerEmail { get; set; }
+    public string CustomerPhone { get; set; }
+    public string SupplierId { get; private set; }
+    public List<OrderItem> Items { get; set; }
+    public OrderStatus Status { get; set; }
+    public DateTime? ConfirmedAt { get; set; }
+    public DateTime? DeliveryDate { get; set; }
+    public string? DeliveryAddress { get; set; }
+    public string? SpecialInstructions { get; set; }
+    public Money TotalAmount { get; private set; }
+    public string? Notes { get; private set; }
+    public Dictionary<string, object> Metadata { get; private set; }
+
+    // 工厂方法
+    public static Order Create(OrderId id, CustomerId customerId) { /* ... */ }
+    public static Order Create(CustomerId customerId) { /* ... */ }
     
     // 业务方法
-    public void Confirm() { /* ... */ }
-    public void Cancel() { /* ... */ }
-    public void AddItem(OrderItem item) { /* ... */ }
+    public void AddItem(ProductInfo productInfo, Quantity quantity, Money unitPrice) { /* ... */ }
+    public void RemoveItem(string productId) { /* ... */ }
+    public void UpdateDeliveryInfo(DateTime? deliveryDate, string? deliveryAddress) { /* ... */ }
+    public void SetSpecialInstructions(string? instructions) { /* ... */ }
+    public void Validate() { /* ... */ }
+    public void MarkAsValidated() { /* ... */ }
+    public void StartEnrichment() { /* ... */ }
+    public void CompleteEnrichment(Dictionary<string, object> enrichmentData) { /* ... */ }
+    public void StartProcessing() { /* ... */ }
+    public void Confirm(string supplierId) { /* ... */ }
+    public void Cancel(string reason) { /* ... */ }
+    public void MarkAsFailed(string reason) { /* ... */ }
+    public void MarkAsDelivered() { /* ... */ }
+    
+    // 业务规则查询
+    public bool CanBeCancelled() { /* ... */ }
+    public bool IsHighValue(decimal threshold = 1000m) { /* ... */ }
 }
+
+public class OrderItem : Entity
+{
+    public ProductInfo ProductInfo { get; set; }
+    public Quantity Quantity { get; set; }
+    public Money UnitPrice { get; set; }
+    public Dictionary<string, object> Properties { get; private set; }
+
+    // 工厂方法
+    public static OrderItem Create(ProductInfo productInfo, Quantity quantity, Money unitPrice) { /* ... */ }
+    
+    // 业务方法
+    public Money GetTotalPrice() { /* ... */ }
+    public void UpdateQuantity(Quantity newQuantity) { /* ... */ }
+    public void UpdateUnitPrice(Money newUnitPrice) { /* ... */ }
+    
+    // 向后兼容属性
+    public string ProductId { get; set; }
+    public string ProductName { get; set; }
+    public string? Category { get; set; }
+    public decimal TotalPrice => GetTotalPrice().Amount;
+}
+```
+
+### DDD 实现架构
+
+#### 领域基础设施
+
+**AggregateRoot (聚合根)**
+```csharp
+public abstract class AggregateRoot : Entity
+{
+    private readonly List<IDomainEvent> _domainEvents = new();
+    public IReadOnlyCollection<IDomainEvent> DomainEvents => _domainEvents.AsReadOnly();
+    
+    protected void AddDomainEvent(IDomainEvent domainEvent) { /* ... */ }
+    public void MarkEventsAsCommitted() { /* ... */ }
+    public void ClearDomainEvents() { /* ... */ }
+}
+```
+
+**Entity (实体基类)**
+```csharp
+public abstract class Entity
+{
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+    public string CreatedBy { get; set; }
+    public string UpdatedBy { get; set; }
+    
+    protected void UpdateTimestamp(string updatedBy = "System") { /* ... */ }
+    // 相等性比较实现...
+}
+```
+
+#### 值对象 (Value Objects)
+
+**OrderId** - 强类型订单标识符
+```csharp
+public sealed class OrderId : ValueObject
+{
+    public string Value { get; }
+    public static OrderId CreateNew() => new($"ORD-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString("N")[..8].ToUpper()}");
+    public static implicit operator string(OrderId orderId) => orderId.Value;
+}
+```
+
+**Money** - 金额值对象，支持币种和运算
+```csharp
+public sealed class Money : ValueObject
+{
+    public decimal Amount { get; }
+    public string Currency { get; }
+    
+    public Money Add(Money other) { /* 币种一致性检查 */ }
+    public Money Multiply(decimal multiplier) { /* ... */ }
+    public bool IsGreaterThan(Money other) { /* ... */ }
+}
+```
+
+**ProductInfo** - 产品信息封装
+```csharp
+public sealed class ProductInfo : ValueObject
+{
+    public string ProductId { get; }
+    public string ProductName { get; }
+    public string? Category { get; }
+    
+    public static ProductInfo Create(string productId, string productName, string? category = null) { /* ... */ }
+}
+```
+
+**Quantity** - 数量值对象，确保正数约束
+```csharp
+public sealed class Quantity : ValueObject
+{
+    public int Value { get; }
+    
+    private Quantity(int value)
+    {
+        if (value <= 0) throw new ArgumentException("Quantity must be greater than zero");
+        Value = value;
+    }
+}
+```
+
+#### 领域事件 (Domain Events)
+
+```csharp
+// 订单生命周期事件
+public class OrderCreatedEvent : DomainEvent
+{
+    public OrderId OrderId { get; }
+    public CustomerId CustomerId { get; }
+}
+
+public class OrderConfirmedEvent : DomainEvent
+{
+    public OrderId OrderId { get; }
+    public string SupplierId { get; }
+    public Money TotalAmount { get; }
+}
+
+public class OrderCancelledEvent : DomainEvent
+{
+    public OrderId OrderId { get; }
+    public string Reason { get; }
+}
+
+// 更多事件: OrderValidatedEvent, OrderFailedEvent, OrderDeliveredEvent...
+```
+
+#### 业务规则实现
+
+**订单状态转换规则**
+```csharp
+public void Validate()
+{
+    if (Status != OrderStatus.Received)
+        throw new InvalidOperationException($"Cannot validate order in status {Status}");
+    
+    if (!Items.Any())
+        throw new InvalidOperationException("Cannot validate order without items");
+        
+    Status = OrderStatus.Validating;
+    AddDomainEvent(new OrderValidationStartedEvent(Id));
+}
+
+public void Confirm(string supplierId)
+{
+    if (Status != OrderStatus.Processing)
+        throw new InvalidOperationException($"Cannot confirm order from status {Status}");
+        
+    SupplierId = supplierId;
+    Status = OrderStatus.Confirmed;
+    ConfirmedAt = DateTime.UtcNow;
+    AddDomainEvent(new OrderConfirmedEvent(Id, SupplierId, TotalAmount));
+}
+
+public bool CanBeCancelled()
+{
+    return Status is OrderStatus.Received or OrderStatus.Validating or OrderStatus.Validated;
+}
+```
+
+**金额计算规则**
+```csharp
+private void RecalculateTotalAmount()
+{
+    TotalAmount = Items.Aggregate(Money.Zero(), (total, item) => total.Add(item.GetTotalPrice()));
+}
+
+public bool IsHighValue(decimal threshold = 1000m)
+{
+    return TotalAmount.Amount > threshold;
+}
+```
+
+#### 向后兼容性设计
+
+为了保持与现有代码的兼容性，我们实现了以下策略：
+
+1. **公共构造函数**: 保留无参构造函数用于序列化和现有代码
+2. **属性访问器**: 提供向后兼容的属性 getter/setter
+3. **隐式转换**: 值对象支持与原始类型的隐式转换
+4. **适配器属性**: OrderItem 提供 ProductId, ProductName 等便捷访问
+
+```csharp
+// OrderItem 向后兼容属性
+public string ProductId 
+{ 
+    get => ProductInfo.ProductId;
+    set => ProductInfo = ProductInfo.Create(value, ProductInfo.ProductName, ProductInfo.Category);
+}
+public decimal TotalPrice => GetTotalPrice().Amount;
 ```
 
 ### 数据存储策略
@@ -515,6 +754,33 @@ stages:
 | Service Bus | $50 | 标准层 |
 | Application Insights | $100 | 基础监控 |
 | **总计** | **$650** | 预估月成本 |
+
+## 📝 更新历史
+
+### 2025-01-18 - DDD 重构完成
+- ✅ **完成领域驱动设计 (DDD) 重构**
+  - 实现 AggregateRoot, Entity, ValueObject 基础设施
+  - 创建强类型值对象: OrderId, CustomerId, Money, ProductInfo, Quantity
+  - Order 聚合根实现丰富的业务方法和规则
+  - OrderItem 实体化，支持业务操作
+  - 领域事件支持业务活动追踪
+
+- ✅ **向后兼容性保障**
+  - 保留现有 API 接口不变
+  - 提供属性访问器兼容现有代码
+  - 隐式转换支持与原始类型的无缝集成
+
+- ✅ **架构收益实现**
+  - 业务逻辑集中到领域层
+  - 强类型安全防止常见错误
+  - 领域事件支持事件驱动架构
+  - 丰富的业务方法便于单元测试
+  - 清晰的领域模型提升可维护性
+
+### 2025-01-17 - 微服务容器化
+- ✅ **Azure Functions 容器化**: 实现 Order Integration Function 和 Customer Communication Function 的 Docker 支持
+- ✅ **一键启动优化**: 更新 docker-dev.sh 支持所有 4 个微服务的统一管理
+- ✅ **Service Bus 配置修复**: 解决预创建队列配置问题，确保消息传递稳定性
 
 ---
 

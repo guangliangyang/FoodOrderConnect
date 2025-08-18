@@ -4,6 +4,7 @@ using BidOne.Shared.Events;
 using BidOne.Shared.Metrics;
 using BidOne.Shared.Models;
 using BidOne.Shared.Services;
+using BidOne.Shared.Domain.ValueObjects;
 using Microsoft.Extensions.Caching.Distributed;
 
 namespace BidOne.ExternalOrderApi.Services;
@@ -37,32 +38,28 @@ public class OrderService : IOrderService
 
         try
         {
-            // Create order object
-            var order = new Order
+            // Create order using domain model
+            var order = Order.Create(OrderId.Create(orderId), CustomerId.Create(request.CustomerId));
+            
+            // Add items using domain methods
+            foreach (var item in request.Items)
             {
-                Id = orderId,
-                CustomerId = request.CustomerId,
-                Items = request.Items.Select(item => new OrderItem
-                {
-                    ProductId = item.ProductId,
-                    Quantity = item.Quantity,
-                    UnitPrice = item.UnitPrice
-                }).ToList(),
-                Status = OrderStatus.Received,
-                CreatedAt = DateTime.UtcNow,
-                DeliveryDate = request.DeliveryDate,
-                Notes = request.Notes,
-                Metadata = new Dictionary<string, object>
-                {
-                    ["SourceSystem"] = "ExternalOrderApi",
-                    ["CorrelationId"] = correlationId,
-                    ["ClientIpAddress"] = GetClientIpAddress(),
-                    ["UserAgent"] = GetUserAgent()
-                }
-            };
-
-            // Calculate total amount
-            order.TotalAmount = order.Items.Sum(item => item.TotalPrice);
+                var productInfo = ProductInfo.Create(item.ProductId, item.ProductId); // ProductName would come from enrichment
+                var quantity = Quantity.Create(item.Quantity);
+                var unitPrice = Money.Create(item.UnitPrice);
+                
+                order.AddItem(productInfo, quantity, unitPrice);
+            }
+            
+            // Set delivery and notes
+            order.UpdateDeliveryInfo(request.DeliveryDate, null);
+            order.SetNotes(request.Notes);
+            
+            // Set metadata
+            order.Metadata["SourceSystem"] = "ExternalOrderApi";
+            order.Metadata["CorrelationId"] = correlationId;
+            order.Metadata["ClientIpAddress"] = GetClientIpAddress();
+            order.Metadata["UserAgent"] = GetUserAgent();
 
             // Store order in cache for quick status lookups
             await CacheOrderAsync(order, cancellationToken);
@@ -70,8 +67,8 @@ public class OrderService : IOrderService
             // Publish order received event to Service Bus
             var orderReceivedEvent = new OrderReceivedEvent
             {
-                OrderId = orderId,
-                CustomerId = request.CustomerId,
+                OrderId = order.Id.Value,
+                CustomerId = order.CustomerId.Value,
                 ReceivedAt = order.CreatedAt,
                 SourceSystem = "ExternalOrderApi",
                 CorrelationId = correlationId
@@ -104,8 +101,8 @@ public class OrderService : IOrderService
 
             return new OrderResponse
             {
-                OrderId = orderId,
-                Status = OrderStatus.Received,
+                OrderId = order.Id.Value,
+                Status = order.Status,
                 Message = "Order received and queued for processing",
                 CreatedAt = order.CreatedAt
             };
@@ -143,7 +140,7 @@ public class OrderService : IOrderService
 
             return new OrderResponse
             {
-                OrderId = order.Id,
+                OrderId = order.Id.Value,
                 Status = order.Status,
                 Message = GetStatusMessage(order.Status),
                 CreatedAt = order.CreatedAt
@@ -176,20 +173,20 @@ public class OrderService : IOrderService
                 return null;
             }
 
-            // Check if order can be cancelled
-            if (!CanCancelOrder(order.Status))
+            // Check if order can be cancelled using domain logic
+            if (!order.CanBeCancelled())
             {
                 throw new InvalidOperationException($"Order {orderId} cannot be cancelled in status {order.Status}");
             }
 
-            // Update order status
-            order.Status = OrderStatus.Cancelled;
+            // Cancel order using domain method
+            order.Cancel("Cancelled by user");
             await CacheOrderAsync(order, cancellationToken);
 
             // Publish cancellation event
             var orderCancelledEvent = new OrderFailedEvent
             {
-                OrderId = orderId,
+                OrderId = order.Id.Value,
                 FailureReason = "Cancelled by user",
                 FailedAt = DateTime.UtcNow,
                 IsRetryable = false,
@@ -260,10 +257,6 @@ public class OrderService : IOrderService
         };
     }
 
-    private static bool CanCancelOrder(OrderStatus status)
-    {
-        return status is OrderStatus.Received or OrderStatus.Validating or OrderStatus.Validated;
-    }
 
     private string GetClientIpAddress()
     {
