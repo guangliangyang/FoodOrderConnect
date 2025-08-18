@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Azure.Messaging.ServiceBus;
+using Azure.Messaging.ServiceBus.Administration;
 using BidOne.Shared.Events;
 using BidOne.Shared.Services;
 
@@ -8,16 +9,35 @@ namespace BidOne.ExternalOrderApi.Services;
 public class ServiceBusMessagePublisher : IMessagePublisher, IDisposable
 {
     private readonly ServiceBusClient _serviceBusClient;
+    private readonly ServiceBusAdministrationClient? _adminClient;
     private readonly ILogger<ServiceBusMessagePublisher> _logger;
     private readonly Dictionary<string, ServiceBusSender> _senders;
     private readonly SemaphoreSlim _semaphore;
+    private readonly HashSet<string> _createdQueues = new();
 
-    public ServiceBusMessagePublisher(ServiceBusClient serviceBusClient, ILogger<ServiceBusMessagePublisher> logger)
+    public ServiceBusMessagePublisher(ServiceBusClient serviceBusClient, ILogger<ServiceBusMessagePublisher> logger, IConfiguration configuration)
     {
         _serviceBusClient = serviceBusClient;
         _logger = logger;
         _senders = new Dictionary<string, ServiceBusSender>();
         _semaphore = new SemaphoreSlim(1, 1);
+        
+        // Create admin client for queue management
+        var connectionString = configuration.GetConnectionString("ServiceBus");
+        if (!string.IsNullOrEmpty(connectionString))
+        {
+            try
+            {
+                _adminClient = new ServiceBusAdministrationClient(connectionString);
+                _logger.LogInformation("ServiceBusAdministrationClient initialized with connection: {Connection}", 
+                    connectionString.Replace("SAS_KEY_VALUE", "***"));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to initialize ServiceBusAdministrationClient. Dynamic queue creation will be disabled.");
+                _adminClient = null;
+            }
+        }
     }
 
     public async Task PublishAsync<T>(T message, string queueName, CancellationToken cancellationToken = default) where T : class
@@ -138,6 +158,9 @@ public class ServiceBusMessagePublisher : IMessagePublisher, IDisposable
         await _semaphore.WaitAsync();
         try
         {
+            // Ensure queue exists before creating sender
+            await EnsureQueueExistsAsync(queueName);
+
             if (!_senders.TryGetValue(queueName, out var sender))
             {
                 sender = _serviceBusClient.CreateSender(queueName);
@@ -150,6 +173,62 @@ public class ServiceBusMessagePublisher : IMessagePublisher, IDisposable
         finally
         {
             _semaphore.Release();
+        }
+    }
+
+    private async Task EnsureQueueExistsAsync(string queueName)
+    {
+        if (_createdQueues.Contains(queueName))
+        {
+            return; // Already processed this queue
+        }
+
+        // For development emulator: queues are pre-created via configuration
+        if (IsEmulatorEnvironment())
+        {
+            _logger.LogDebug("Service Bus Emulator: Using pre-configured queue '{QueueName}'", queueName);
+            _createdQueues.Add(queueName);
+            return;
+        }
+
+        // For production: use real Azure Service Bus management API for dynamic creation
+        if (_adminClient != null)
+        {
+            await HandleProductionQueueAsync(queueName);
+        }
+        else
+        {
+            _logger.LogWarning("Queue management unavailable for '{QueueName}'. Assuming queue exists.", queueName);
+            _createdQueues.Add(queueName);
+        }
+    }
+
+    private bool IsEmulatorEnvironment()
+    {
+        // Check if we're using the Service Bus emulator
+        return Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") == "Development";
+    }
+
+    private async Task HandleProductionQueueAsync(string queueName)
+    {
+        try
+        {
+            _logger.LogDebug("Checking if queue exists: {QueueName}", queueName);
+            var queueExists = await _adminClient!.QueueExistsAsync(queueName);
+            
+            if (!queueExists)
+            {
+                _logger.LogInformation("Creating new queue in production: {QueueName}", queueName);
+                await _adminClient.CreateQueueAsync(queueName);
+                _logger.LogInformation("✅ Successfully created Service Bus queue: {QueueName}", queueName);
+            }
+            
+            _createdQueues.Add(queueName);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to ensure queue {QueueName} exists. Will attempt to send anyway.", queueName);
+            _createdQueues.Add(queueName);
         }
     }
 
@@ -199,6 +278,9 @@ public class ServiceBusMessagePublisher : IMessagePublisher, IDisposable
         {
             _logger.LogWarning(ex, "Error disposing Service Bus client");
         }
+
+        // ServiceBusAdministrationClient doesn't implement IAsyncDisposable in this version
+        // It will be disposed by GC
 
         GC.SuppressFinalize(this);
     }

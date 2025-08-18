@@ -84,11 +84,13 @@ services:
     environment:
       ACCEPT_EULA: 'Y'
       SQL_SERVER: sqlserver
-      MSSQL_SA_PASSWORD: BidOne123!  
+      MSSQL_SA_PASSWORD: BidOne123!
+      CONFIG_PATH: /ServiceBus_Emulator/ConfigFiles/Config.json
     ports:
       - "5672:5672"
     volumes:
       - servicebus-data:/data
+      - ./config/servicebus-emulator-config.json:/ServiceBus_Emulator/ConfigFiles/Config.json:ro
     networks:
       - bidone-network
     depends_on:
@@ -144,7 +146,7 @@ services:
       redis:
         condition: service_healthy
       servicebus:
-        condition: service_healthy
+        condition: service_started
     networks:
       - bidone-network
     healthcheck:
