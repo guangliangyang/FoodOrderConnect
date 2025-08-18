@@ -21,7 +21,7 @@ public class ServiceBusMessagePublisher : IMessagePublisher, IDisposable
         _logger = logger;
         _senders = new Dictionary<string, ServiceBusSender>();
         _semaphore = new SemaphoreSlim(1, 1);
-        
+
         // Create admin client for queue management
         var connectionString = configuration.GetConnectionString("ServiceBus");
         if (!string.IsNullOrEmpty(connectionString))
@@ -29,7 +29,7 @@ public class ServiceBusMessagePublisher : IMessagePublisher, IDisposable
             try
             {
                 _adminClient = new ServiceBusAdministrationClient(connectionString);
-                _logger.LogInformation("ServiceBusAdministrationClient initialized with connection: {Connection}", 
+                _logger.LogInformation("ServiceBusAdministrationClient initialized with connection: {Connection}",
                     connectionString.Replace("SAS_KEY_VALUE", "***"));
             }
             catch (Exception ex)
@@ -215,14 +215,14 @@ public class ServiceBusMessagePublisher : IMessagePublisher, IDisposable
         {
             _logger.LogDebug("Checking if queue exists: {QueueName}", queueName);
             var queueExists = await _adminClient!.QueueExistsAsync(queueName);
-            
+
             if (!queueExists)
             {
                 _logger.LogInformation("Creating new queue in production: {QueueName}", queueName);
                 await _adminClient.CreateQueueAsync(queueName);
                 _logger.LogInformation("✅ Successfully created Service Bus queue: {QueueName}", queueName);
             }
-            
+
             _createdQueues.Add(queueName);
         }
         catch (Exception ex)
