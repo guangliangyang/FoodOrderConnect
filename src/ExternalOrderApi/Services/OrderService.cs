@@ -1,10 +1,10 @@
 using System.Diagnostics;
 using System.Text.Json;
+using BidOne.Shared.Domain.ValueObjects;
 using BidOne.Shared.Events;
 using BidOne.Shared.Metrics;
 using BidOne.Shared.Models;
 using BidOne.Shared.Services;
-using BidOne.Shared.Domain.ValueObjects;
 using Microsoft.Extensions.Caching.Distributed;
 
 namespace BidOne.ExternalOrderApi.Services;
@@ -40,21 +40,21 @@ public class OrderService : IOrderService
         {
             // Create order using domain model
             var order = Order.Create(OrderId.Create(orderId), CustomerId.Create(request.CustomerId));
-            
+
             // Add items using domain methods
             foreach (var item in request.Items)
             {
                 var productInfo = ProductInfo.Create(item.ProductId, item.ProductId); // ProductName would come from enrichment
                 var quantity = Quantity.Create(item.Quantity);
                 var unitPrice = Money.Create(item.UnitPrice);
-                
+
                 order.AddItem(productInfo, quantity, unitPrice);
             }
-            
+
             // Set delivery and notes
             order.UpdateDeliveryInfo(request.DeliveryDate, null);
             order.SetNotes(request.Notes);
-            
+
             // Set metadata
             order.Metadata["SourceSystem"] = "ExternalOrderApi";
             order.Metadata["CorrelationId"] = correlationId;

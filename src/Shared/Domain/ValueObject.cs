@@ -13,7 +13,7 @@ public abstract class ValueObject
             return false;
 
         var valueObject = (ValueObject)obj;
-        
+
         return GetEqualityComponents().SequenceEqual(valueObject.GetEqualityComponents());
     }
 

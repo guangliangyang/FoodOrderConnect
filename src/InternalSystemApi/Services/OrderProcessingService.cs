@@ -2,11 +2,11 @@ using System.Text.Json;
 using AutoMapper;
 using BidOne.InternalSystemApi.Data;
 using BidOne.InternalSystemApi.Data.Entities;
+using BidOne.Shared.Domain.ValueObjects;
 using BidOne.Shared.Events;
 using BidOne.Shared.Metrics;
 using BidOne.Shared.Models;
 using BidOne.Shared.Services;
-using BidOne.Shared.Domain.ValueObjects;
 using Microsoft.EntityFrameworkCore;
 
 namespace BidOne.InternalSystemApi.Services;

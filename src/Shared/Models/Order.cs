@@ -1,7 +1,7 @@
 using System.ComponentModel.DataAnnotations;
 using BidOne.Shared.Domain;
-using BidOne.Shared.Domain.ValueObjects;
 using BidOne.Shared.Domain.Events;
+using BidOne.Shared.Domain.ValueObjects;
 
 namespace BidOne.Shared.Models;
 
@@ -22,7 +22,7 @@ public class Order : AggregateRoot
     public string? Notes { get; private set; }
     public Dictionary<string, object> Metadata { get; private set; } = new();
 
-    public Order() 
+    public Order()
     {
         Id = OrderId.CreateNew();
         CustomerId = CustomerId.Create("UNKNOWN");
@@ -228,7 +228,7 @@ public class OrderItem : Entity
     public Money UnitPrice { get; set; }
     public Dictionary<string, object> Properties { get; private set; } = new();
 
-    public OrderItem() 
+    public OrderItem()
     {
         ProductInfo = ProductInfo.Create("UNKNOWN", "UNKNOWN");
         Quantity = Quantity.Create(1);
@@ -271,18 +271,18 @@ public class OrderItem : Entity
     }
 
     // Backward compatibility properties
-    public string ProductId 
-    { 
+    public string ProductId
+    {
         get => ProductInfo.ProductId;
         set => ProductInfo = ProductInfo.Create(value, ProductInfo.ProductName, ProductInfo.Category);
     }
-    public string ProductName 
-    { 
+    public string ProductName
+    {
         get => ProductInfo.ProductName;
         set => ProductInfo = ProductInfo.Create(ProductInfo.ProductId, value, ProductInfo.Category);
     }
-    public string? Category 
-    { 
+    public string? Category
+    {
         get => ProductInfo.Category;
         set => ProductInfo = ProductInfo.Create(ProductInfo.ProductId, ProductInfo.ProductName, value);
     }

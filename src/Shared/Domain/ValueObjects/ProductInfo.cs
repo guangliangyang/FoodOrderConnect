@@ -10,7 +10,7 @@ public sealed class ProductInfo : ValueObject
     {
         if (string.IsNullOrWhiteSpace(productId))
             throw new ArgumentException("Product ID cannot be null or empty", nameof(productId));
-        
+
         if (string.IsNullOrWhiteSpace(productName))
             throw new ArgumentException("Product name cannot be null or empty", nameof(productName));
 

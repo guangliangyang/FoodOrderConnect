@@ -9,7 +9,7 @@ public sealed class Money : ValueObject
     {
         if (amount < 0)
             throw new ArgumentException("Money amount cannot be negative", nameof(amount));
-        
+
         if (string.IsNullOrWhiteSpace(currency))
             throw new ArgumentException("Currency cannot be null or empty", nameof(currency));
 
