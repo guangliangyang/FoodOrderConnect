@@ -1,44 +1,44 @@
-# BidOne Integration Platform - 部署指南
+# BidOne Integration Platform - Deployment Guide
 
-## 📋 概述
+## 📋 Overview
 
-本指南将指导您完成 BidOne Integration Platform 的完整部署，包括 Azure 基础设施、微服务应用和 **AI 智能客户沟通系统**的端到端部署。
+This guide will walk you through the complete deployment of the BidOne Integration Platform, including Azure infrastructure, microservices applications, and the **AI-Powered Customer Communication System** end-to-end deployment.
 
-## 🎯 部署架构
+## 🎯 Deployment Architecture
 
 ```mermaid
 graph TB
     subgraph "Azure Cloud"
-        subgraph "🌐 API 层"
+        subgraph "🌐 API Layer"
             ExtAPI[External Order API<br/>Container Apps]
             IntAPI[Internal System API<br/>Container Apps]
-            APIM[API Management<br/>统一网关]
+            APIM[API Management<br/>Unified Gateway]
         end
         
-        subgraph "⚡ 计算层"
+        subgraph "⚡ Compute Layer"
             OrderFunc[Order Integration Function<br/>Azure Functions]
-            AIFunc[Customer Communication Function<br/>🤖 AI智能沟通]
+            AIFunc[Customer Communication Function<br/>🤖 AI-Powered Communication]
         end
         
-        subgraph "📡 消息层"
-            SB[Service Bus<br/>可靠消息传递]
-            EG[Event Grid<br/>事件驱动通信]
+        subgraph "📡 Messaging Layer"
+            SB[Service Bus<br/>Reliable Messaging]
+            EG[Event Grid<br/>Event-Driven Communication]
         end
         
-        subgraph "💾 数据层"
-            SQL[(SQL Database<br/>业务数据)]
-            Cosmos[(Cosmos DB<br/>产品目录)]
-            Redis[(Redis Cache<br/>高速缓存)]
+        subgraph "💾 Data Layer"
+            SQL[(SQL Database<br/>Business Data)]
+            Cosmos[(Cosmos DB<br/>Product Catalog)]
+            Redis[(Redis Cache<br/>High-Speed Cache)]
         end
         
-        subgraph "🔒 安全与监控"
-            AI_Insights[Application Insights<br/>应用监控]
-            KV[Key Vault<br/>密钥管理]
-            ACR[Container Registry<br/>镜像存储]
+        subgraph "🔒 Security & Monitoring"
+            AI_Insights[Application Insights<br/>Application Monitoring]
+            KV[Key Vault<br/>Key Management]
+            ACR[Container Registry<br/>Image Storage]
         end
         
-        subgraph "🤖 AI 集成"
-            OpenAI[OpenAI API<br/>LangChain集成]
+        subgraph "🤖 AI Integration"
+            OpenAI[OpenAI API<br/>LangChain Integration]
         end
     end
     
@@ -50,50 +50,50 @@ graph TB
     AIFunc --> SB
 ```
 
-## 🔧 前置要求
+## 🔧 Prerequisites
 
-### 必需工具
-- **Azure CLI** 2.50+ - [安装指南](https://docs.microsoft.com/en-us/cli/azure/install-azure-cli)
-- **.NET 8.0 SDK** - [下载地址](https://dotnet.microsoft.com/download)
-- **Docker Desktop** - [下载地址](https://www.docker.com/products/docker-desktop)
-- **Azure Functions Core Tools** v4 - [安装指南](https://docs.microsoft.com/en-us/azure/azure-functions/functions-run-local)
+### Required Tools
+- **Azure CLI** 2.50+ - [Installation Guide](https://docs.microsoft.com/en-us/cli/azure/install-azure-cli)
+- **.NET 8.0 SDK** - [Download](https://dotnet.microsoft.com/download)
+- **Docker Desktop** - [Download](https://www.docker.com/products/docker-desktop)
+- **Azure Functions Core Tools** v4 - [Installation Guide](https://docs.microsoft.com/en-us/azure/azure-functions/functions-run-local)
 
-### Azure 权限要求
-- Azure 订阅 **所有者** 或 **贡献者** 权限
-- 能够创建资源组和注册Azure AD应用程序
-- Service Principal 创建权限（用于 CI/CD）
+### Azure Permission Requirements
+- Azure subscription **Owner** or **Contributor** permissions
+- Ability to create resource groups and register Azure AD applications
+- Service Principal creation permissions (for CI/CD)
 
-### 可选要求
-- **OpenAI API Key** - 启用真实AI功能（否则使用智能模拟）
-- **GitHub账号** - 自动化CI/CD部署
+### Optional Requirements
+- **OpenAI API Key** - Enable real AI features (otherwise uses intelligent simulation)
+- **GitHub Account** - Automated CI/CD deployment
 
-## 🚀 快速部署（推荐）
+## 🚀 Quick Deployment (Recommended)
 
-### 步骤 1: 环境准备
+### Step 1: Environment Preparation
 
 ```bash
-# 1. 克隆项目
+# 1. Clone the project
 git clone <repository-url>
 cd FoodOrderConnect
 
-# 2. 登录 Azure
+# 2. Login to Azure
 az login
 az account set --subscription "<your-subscription-id>"
 
-# 3. 设置环境变量
+# 3. Set environment variables
 export RESOURCE_GROUP="rg-bidone-demo"
 export LOCATION="eastus"
 export ENVIRONMENT="dev"
-export UNIQUE_SUFFIX="$(date +%s | tail -c 4)"  # 确保资源名称唯一
+export UNIQUE_SUFFIX="$(date +%s | tail -c 4)"  # Ensure unique resource names
 ```
 
-### 步骤 2: 一键部署基础设施
+### Step 2: One-Click Infrastructure Deployment
 
 ```bash
-# 创建资源组
+# Create resource group
 az group create --name $RESOURCE_GROUP --location $LOCATION
 
-# 部署完整基础设施（包含AI沟通系统）
+# Deploy complete infrastructure (including AI communication system)
 az deployment group create \
   --resource-group $RESOURCE_GROUP \
   --template-file infra/main.bicep \
@@ -102,36 +102,36 @@ az deployment group create \
                sqlAdminPassword="SecurePassword123!" \
   --name "bidone-infrastructure-$(date +%Y%m%d-%H%M%S)"
 
-# 获取部署输出
+# Get deployment outputs
 az deployment group show \
   --resource-group $RESOURCE_GROUP \
   --name "bidone-infrastructure-$(date +%Y%m%d-%H%M%S)" \
   --query properties.outputs
 ```
 
-### 步骤 3: 配置 AI 功能
+### Step 3: Configure AI Features
 
 ```bash
-# 获取 Key Vault 名称
+# Get Key Vault name
 KEY_VAULT_NAME=$(az deployment group show \
   --resource-group $RESOURCE_GROUP \
   --name "bidone-infrastructure-$(date +%Y%m%d-%H%M%S)" \
   --query properties.outputs.keyVaultName.value -o tsv)
 
-# 配置 OpenAI API Key（如果有）
+# Configure OpenAI API Key (if available)
 az keyvault secret set \
   --vault-name $KEY_VAULT_NAME \
   --name "OpenAI-ApiKey" \
   --value "your-openai-api-key-here"
 
-# 如果没有OpenAI API Key，系统将自动使用智能模拟模式
-echo "如果没有OpenAI API Key，AI功能将使用智能模拟模式"
+# If no OpenAI API Key, system will automatically use intelligent simulation mode
+echo "If no OpenAI API Key, AI features will use intelligent simulation mode"
 ```
 
-### 步骤 4: 部署应用程序
+### Step 4: Deploy Applications
 
 ```bash
-# 获取容器注册表信息
+# Get container registry information
 ACR_NAME=$(az deployment group show \
   --resource-group $RESOURCE_GROUP \
   --name "bidone-infrastructure-$(date +%Y%m%d-%H%M%S)" \
@@ -139,10 +139,10 @@ ACR_NAME=$(az deployment group show \
 
 ACR_LOGIN_SERVER=$(az acr show --name $ACR_NAME --query loginServer -o tsv)
 
-# 登录容器注册表
+# Login to container registry
 az acr login --name $ACR_NAME
 
-# 构建并推送容器镜像
+# Build and push container images
 docker build -t $ACR_LOGIN_SERVER/bidone/external-order-api:latest \
   -f src/ExternalOrderApi/Dockerfile .
 
@@ -152,19 +152,19 @@ docker build -t $ACR_LOGIN_SERVER/bidone/internal-system-api:latest \
 docker push $ACR_LOGIN_SERVER/bidone/external-order-api:latest
 docker push $ACR_LOGIN_SERVER/bidone/internal-system-api:latest
 
-echo "✅ 容器镜像构建并推送完成"
+echo "✅ Container images built and pushed successfully"
 ```
 
-### 步骤 5: 部署 Container Apps
+### Step 5: Deploy Container Apps
 
 ```bash
-# 获取 Container Apps 环境名称
+# Get Container Apps environment name
 CONTAINER_ENV_NAME=$(az deployment group show \
   --resource-group $RESOURCE_GROUP \
   --name "bidone-infrastructure-$(date +%Y%m%d-%H%M%S)" \
   --query properties.outputs.containerAppsEnvironmentName.value -o tsv)
 
-# 部署 External Order API
+# Deploy External Order API
 az containerapp create \
   --name external-order-api \
   --resource-group $RESOURCE_GROUP \
@@ -181,7 +181,7 @@ az containerapp create \
     ASPNETCORE_ENVIRONMENT=Production \
     ServiceBus__ConnectionString=secretref:servicebus-connection
 
-# 部署 Internal System API
+# Deploy Internal System API
 az containerapp create \
   --name internal-system-api \
   --resource-group $RESOURCE_GROUP \
@@ -199,13 +199,13 @@ az containerapp create \
     ConnectionStrings__DefaultConnection=secretref:sql-connection \
     ServiceBus__ConnectionString=secretref:servicebus-connection
 
-echo "✅ Container Apps 部署完成"
+echo "✅ Container Apps deployment completed"
 ```
 
-### 步骤 6: 部署 Azure Functions
+### Step 6: Deploy Azure Functions
 
 ```bash
-# 获取Function App名称
+# Get Function App names
 ORDER_FUNC_NAME=$(az deployment group show \
   --resource-group $RESOURCE_GROUP \
   --name "bidone-infrastructure-$(date +%Y%m%d-%H%M%S)" \
@@ -216,22 +216,22 @@ AI_FUNC_NAME=$(az deployment group show \
   --name "bidone-infrastructure-$(date +%Y%m%d-%H%M%S)" \
   --query properties.outputs.aiFunctionAppName.value -o tsv)
 
-# 部署 Order Integration Function
+# Deploy Order Integration Function
 cd src/OrderIntegrationFunction
 func azure functionapp publish $ORDER_FUNC_NAME --csharp
 
-# 部署 Customer Communication Function (AI)
+# Deploy Customer Communication Function (AI)
 cd ../CustomerCommunicationFunction
 func azure functionapp publish $AI_FUNC_NAME --csharp
 
 cd ../../
-echo "✅ Azure Functions 部署完成"
+echo "✅ Azure Functions deployment completed"
 ```
 
-### 步骤 7: 验证部署
+### Step 7: Verify Deployment
 
 ```bash
-# 获取API端点
+# Get API endpoints
 EXTERNAL_API_URL=$(az containerapp show \
   --name external-order-api \
   --resource-group $RESOURCE_GROUP \
@@ -242,22 +242,22 @@ INTERNAL_API_URL=$(az containerapp show \
   --resource-group $RESOURCE_GROUP \
   --query properties.configuration.ingress.fqdn -o tsv)
 
-echo "🎉 部署完成！"
+echo "🎉 Deployment completed!"
 echo "📍 External Order API: https://$EXTERNAL_API_URL"
 echo "📍 Internal System API: https://$INTERNAL_API_URL"
 
-# 测试API健康状态
-curl -f "https://$EXTERNAL_API_URL/health" && echo "✅ External API健康"
-curl -f "https://$INTERNAL_API_URL/health" && echo "✅ Internal API健康"
+# Test API health status
+curl -f "https://$EXTERNAL_API_URL/health" && echo "✅ External API healthy"
+curl -f "https://$INTERNAL_API_URL/health" && echo "✅ Internal API healthy"
 ```
 
-## 📝 详细部署步骤
+## 📝 Detailed Deployment Steps
 
-### 1. 基础设施即代码 (Bicep)
+### 1. Infrastructure as Code (Bicep)
 
-#### 1.1 参数配置
+#### 1.1 Parameter Configuration
 
-创建环境特定的参数文件：
+Create environment-specific parameter files:
 
 ```json
 // infra/parameters.prod.json
@@ -284,22 +284,22 @@ curl -f "https://$INTERNAL_API_URL/health" && echo "✅ Internal API健康"
 }
 ```
 
-#### 1.2 基础设施部署
+#### 1.2 Infrastructure Deployment
 
 ```bash
-# 验证Bicep模板
+# Validate Bicep template
 az deployment group validate \
     --resource-group $RESOURCE_GROUP \
     --template-file infra/main.bicep \
     --parameters infra/parameters.prod.json
 
-# 预览部署更改
+# Preview deployment changes
 az deployment group what-if \
     --resource-group $RESOURCE_GROUP \
     --template-file infra/main.bicep \
     --parameters infra/parameters.prod.json
 
-# 执行部署
+# Execute deployment
 az deployment group create \
     --resource-group $RESOURCE_GROUP \
     --template-file infra/main.bicep \
@@ -308,18 +308,18 @@ az deployment group create \
     --verbose
 ```
 
-### 2. 数据库初始化
+### 2. Database Initialization
 
-#### 2.1 SQL Database 初始化
+#### 2.1 SQL Database Initialization
 
 ```bash
-# 获取SQL Server连接信息
+# Get SQL Server connection information
 SQL_SERVER_NAME=$(az deployment group show \
   --resource-group $RESOURCE_GROUP \
   --name "bidone-infra-$(date +%Y%m%d-%H%M%S)" \
   --query properties.outputs.sqlServerName.value -o tsv)
 
-# 配置防火墙规则允许本地访问
+# Configure firewall rules to allow local access
 CLIENT_IP=$(curl -s https://api.ipify.org)
 az sql server firewall-rule create \
   --resource-group $RESOURCE_GROUP \
@@ -328,25 +328,25 @@ az sql server firewall-rule create \
   --start-ip-address $CLIENT_IP \
   --end-ip-address $CLIENT_IP
 
-# 运行数据库迁移
+# Run database migrations
 cd src/InternalSystemApi
 dotnet ef database update \
   --connection "Server=$SQL_SERVER_NAME.database.windows.net;Database=BidOneDB;User Id=sqladmin;Password=YourSecurePassword123!;Encrypt=true;TrustServerCertificate=false;"
 
 cd ../../
-echo "✅ 数据库初始化完成"
+echo "✅ Database initialization completed"
 ```
 
-#### 2.2 Cosmos DB 初始化
+#### 2.2 Cosmos DB Initialization
 
 ```bash
-# 获取Cosmos DB账户名
+# Get Cosmos DB account name
 COSMOS_ACCOUNT_NAME=$(az deployment group show \
   --resource-group $RESOURCE_GROUP \
   --name "bidone-infra-$(date +%Y%m%d-%H%M%S)" \
   --query properties.outputs.cosmosDbAccountName.value -o tsv)
 
-# 创建数据库和容器
+# Create database and containers
 az cosmosdb sql database create \
     --account-name $COSMOS_ACCOUNT_NAME \
     --resource-group $RESOURCE_GROUP \
@@ -368,15 +368,15 @@ az cosmosdb sql container create \
     --partition-key-path "/customerId" \
     --throughput 400
 
-echo "✅ Cosmos DB 初始化完成"
+echo "✅ Cosmos DB initialization completed"
 ```
 
-### 3. 应用程序配置
+### 3. Application Configuration
 
-#### 3.1 Container Apps 环境变量和密钥
+#### 3.1 Container Apps Environment Variables and Secrets
 
 ```bash
-# 获取连接字符串
+# Get connection strings
 SQL_CONNECTION=$(az sql db show-connection-string \
   --client ado.net \
   --server $SQL_SERVER_NAME \
@@ -395,7 +395,7 @@ COSMOS_CONNECTION=$(az cosmosdb keys list \
   --type connection-strings \
   --query "connectionStrings[0].connectionString" -o tsv)
 
-# 添加密钥到Container Apps
+# Add secrets to Container Apps
 az containerapp secret set \
   --name external-order-api \
   --resource-group $RESOURCE_GROUP \
@@ -410,13 +410,13 @@ az containerapp secret set \
              servicebus-connection="$SERVICEBUS_CONNECTION" \
              cosmos-connection="$COSMOS_CONNECTION"
 
-echo "✅ 应用程序配置完成"
+echo "✅ Application configuration completed"
 ```
 
-#### 3.2 Function Apps 配置
+#### 3.2 Function Apps Configuration
 
 ```bash
-# 配置Order Integration Function
+# Configure Order Integration Function
 az functionapp config appsettings set \
   --name $ORDER_FUNC_NAME \
   --resource-group $RESOURCE_GROUP \
@@ -425,7 +425,7 @@ az functionapp config appsettings set \
     ServiceBusConnection="$SERVICEBUS_CONNECTION" \
     CosmosDbConnectionString="$COSMOS_CONNECTION"
 
-# 配置AI Communication Function
+# Configure AI Communication Function
 az functionapp config appsettings set \
   --name $AI_FUNC_NAME \
   --resource-group $RESOURCE_GROUP \
@@ -433,157 +433,15 @@ az functionapp config appsettings set \
     ServiceBusConnection="$SERVICEBUS_CONNECTION" \
     OpenAI__ApiKey="@Microsoft.KeyVault(SecretUri=https://$KEY_VAULT_NAME.vault.azure.net/secrets/OpenAI-ApiKey/)"
 
-echo "✅ Function Apps 配置完成"
+echo "✅ Function Apps configuration completed"
 ```
 
-### 4. API Management 配置
+## 🧪 Deployment Verification and Testing
+
+### 1. Basic Health Checks
 
 ```bash
-# 获取API Management实例名称
-APIM_NAME=$(az deployment group show \
-  --resource-group $RESOURCE_GROUP \
-  --name "bidone-infra-$(date +%Y%m%d-%H%M%S)" \
-  --query properties.outputs.apimServiceName.value -o tsv)
-
-# 部署API Management配置
-./scripts/deploy-apim-config.sh \
-  --resource-group $RESOURCE_GROUP \
-  --apim-name $APIM_NAME \
-  --external-api-url "https://$EXTERNAL_API_URL" \
-  --internal-api-url "https://$INTERNAL_API_URL"
-
-echo "✅ API Management 配置完成"
-```
-
-### 5. 监控和日志配置
-
-#### 5.1 Application Insights 配置
-
-```bash
-# 获取Application Insights连接字符串
-APP_INSIGHTS_CONNECTION=$(az monitor app-insights component show \
-  --app $(az deployment group show --resource-group $RESOURCE_GROUP --name "bidone-infra-$(date +%Y%m%d-%H%M%S)" --query properties.outputs.applicationInsightsName.value -o tsv) \
-  --resource-group $RESOURCE_GROUP \
-  --query connectionString -o tsv)
-
-# 添加到所有应用程序
-az containerapp update \
-  --name external-order-api \
-  --resource-group $RESOURCE_GROUP \
-  --set-env-vars ApplicationInsights__ConnectionString="$APP_INSIGHTS_CONNECTION"
-
-az containerapp update \
-  --name internal-system-api \
-  --resource-group $RESOURCE_GROUP \
-  --set-env-vars ApplicationInsights__ConnectionString="$APP_INSIGHTS_CONNECTION"
-
-echo "✅ 监控配置完成"
-```
-
-#### 5.2 日志分析工作区
-
-```bash
-# 启用Container Apps日志
-LOG_ANALYTICS_WORKSPACE=$(az deployment group show \
-  --resource-group $RESOURCE_GROUP \
-  --name "bidone-infra-$(date +%Y%m%d-%H%M%S)" \
-  --query properties.outputs.logAnalyticsWorkspaceName.value -o tsv)
-
-echo "✅ 日志分析工作区已配置: $LOG_ANALYTICS_WORKSPACE"
-```
-
-## 🔄 CI/CD 自动化部署
-
-### GitHub Actions 配置
-
-#### 1. 创建Service Principal
-
-```bash
-# 创建用于GitHub Actions的Service Principal
-SUBSCRIPTION_ID=$(az account show --query id -o tsv)
-
-az ad sp create-for-rbac \
-  --name "bidone-github-actions" \
-  --role contributor \
-  --scopes /subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RESOURCE_GROUP \
-  --sdk-auth
-```
-
-#### 2. 配置GitHub Secrets
-
-在GitHub仓库的Settings > Secrets中添加：
-
-```bash
-# 复制上述命令输出的JSON作为 AZURE_CREDENTIALS
-
-# 其他必需的Secrets：
-AZURE_SUBSCRIPTION_ID=<your-subscription-id>
-RESOURCE_GROUP=rg-bidone-demo
-ACR_LOGIN_SERVER=<acr-name>.azurecr.io
-SQL_ADMIN_PASSWORD=YourSecurePassword123!
-OPENAI_API_KEY=<your-openai-key>  # 可选
-```
-
-#### 3. GitHub Actions Workflow
-
-创建 `.github/workflows/deploy.yml`：
-
-```yaml
-name: Deploy to Azure
-
-on:
-  push:
-    branches: [ main ]
-  workflow_dispatch:
-
-env:
-  RESOURCE_GROUP: ${{ secrets.RESOURCE_GROUP }}
-  ACR_LOGIN_SERVER: ${{ secrets.ACR_LOGIN_SERVER }}
-
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    
-    steps:
-    - uses: actions/checkout@v4
-    
-    - name: Login to Azure
-      uses: azure/login@v1
-      with:
-        creds: ${{ secrets.AZURE_CREDENTIALS }}
-    
-    - name: Login to ACR
-      run: az acr login --name ${{ secrets.ACR_LOGIN_SERVER }}
-    
-    - name: Build and Push Images
-      run: |
-        docker build -t $ACR_LOGIN_SERVER/bidone/external-order-api:${{ github.sha }} \
-          -f src/ExternalOrderApi/Dockerfile .
-        docker push $ACR_LOGIN_SERVER/bidone/external-order-api:${{ github.sha }}
-        
-        docker build -t $ACR_LOGIN_SERVER/bidone/internal-system-api:${{ github.sha }} \
-          -f src/InternalSystemApi/Dockerfile .
-        docker push $ACR_LOGIN_SERVER/bidone/internal-system-api:${{ github.sha }}
-    
-    - name: Deploy to Container Apps
-      run: |
-        az containerapp update \
-          --name external-order-api \
-          --resource-group $RESOURCE_GROUP \
-          --image $ACR_LOGIN_SERVER/bidone/external-order-api:${{ github.sha }}
-        
-        az containerapp update \
-          --name internal-system-api \
-          --resource-group $RESOURCE_GROUP \
-          --image $ACR_LOGIN_SERVER/bidone/internal-system-api:${{ github.sha }}
-```
-
-## 🧪 部署验证和测试
-
-### 1. 基础健康检查
-
-```bash
-# 创建部署验证脚本
+# Create deployment verification script
 cat > scripts/verify-deployment.sh << 'EOF'
 #!/bin/bash
 set -euo pipefail
@@ -591,45 +449,45 @@ set -euo pipefail
 RESOURCE_GROUP="$1"
 DEPLOYMENT_NAME="$2"
 
-echo "🔍 验证部署状态..."
+echo "🔍 Verifying deployment status..."
 
-# 获取资源输出
+# Get resource outputs
 EXTERNAL_API_URL=$(az containerapp show --name external-order-api --resource-group $RESOURCE_GROUP --query properties.configuration.ingress.fqdn -o tsv)
 INTERNAL_API_URL=$(az containerapp show --name internal-system-api --resource-group $RESOURCE_GROUP --query properties.configuration.ingress.fqdn -o tsv)
 
-# 健康检查
+# Health checks
 echo "Testing External API..."
 curl -f "https://$EXTERNAL_API_URL/health" || { echo "❌ External API failed"; exit 1; }
 
 echo "Testing Internal API..."
 curl -f "https://$INTERNAL_API_URL/health" || { echo "❌ Internal API failed"; exit 1; }
 
-echo "✅ 所有API健康检查通过"
+echo "✅ All API health checks passed"
 
-# 测试订单创建
-echo "🧪 测试订单创建..."
+# Test order creation
+echo "🧪 Testing order creation..."
 curl -X POST "https://$EXTERNAL_API_URL/orders" \
   -H "Content-Type: application/json" \
   -d '{
     "customerId": "test-customer-001",
     "items": [{"productId": "TEST-001", "quantity": 1, "unitPrice": 10.00}],
     "deliveryDate": "2024-12-20T10:00:00Z"
-  }' || { echo "❌ 订单创建测试失败"; exit 1; }
+  }' || { echo "❌ Order creation test failed"; exit 1; }
 
-echo "✅ 部署验证完成！"
+echo "✅ Deployment verification completed!"
 EOF
 
 chmod +x scripts/verify-deployment.sh
 
-# 运行验证
+# Run verification
 ./scripts/verify-deployment.sh $RESOURCE_GROUP "bidone-infra-$(date +%Y%m%d-%H%M%S)"
 ```
 
-### 2. AI功能测试
+### 2. AI Functionality Testing
 
 ```bash
-# 测试AI智能错误处理
-echo "🤖 测试AI功能..."
+# Test AI intelligent error handling
+echo "🤖 Testing AI functionality..."
 
 curl -X POST "https://$EXTERNAL_API_URL/orders" \
   -H "Content-Type: application/json" \
@@ -639,24 +497,24 @@ curl -X POST "https://$EXTERNAL_API_URL/orders" \
     "deliveryDate": "2024-12-20T10:00:00Z"
   }'
 
-echo "检查AI Function日志："
+echo "Check AI Function logs:"
 az functionapp logs tail --name $AI_FUNC_NAME --resource-group $RESOURCE_GROUP
 
-# 本地测试（开发环境）
-echo "🏠 本地环境测试："
-echo "使用 docker-dev.sh 可以轻松测试相同功能："
-echo "./docker-dev.sh start  # 完整容器化环境"
-echo "# 或者 ./docker-dev.sh infra  # 仅基础设施，本地运行API"
+# Local testing (development environment)
+echo "🏠 Local environment testing:"
+echo "Use docker-dev.sh to easily test the same functionality:"
+echo "./docker-dev.sh start  # Complete containerized environment"
+echo "# or ./docker-dev.sh infra  # Infrastructure only, run APIs locally"
 echo "curl -X POST http://localhost:5001/orders [same-payload]"
 echo "./docker-dev.sh logs customer-communication-function"
 ```
 
-## 📊 监控和维护
+## 📊 Monitoring and Maintenance
 
-### 1. 设置告警规则
+### 1. Setup Alert Rules
 
 ```bash
-# 创建告警规则
+# Create alert rules
 az monitor metrics alert create \
   --name "High Error Rate" \
   --resource-group $RESOURCE_GROUP \
@@ -667,10 +525,10 @@ az monitor metrics alert create \
   --action-group-ids "/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RESOURCE_GROUP/providers/microsoft.insights/actionGroups/bidone-alerts"
 ```
 
-### 2. 备份配置
+### 2. Backup Configuration
 
 ```bash
-# 配置数据库备份
+# Configure database backup
 az sql db ltr-policy set \
   --resource-group $RESOURCE_GROUP \
   --server $SQL_SERVER_NAME \
@@ -680,12 +538,12 @@ az sql db ltr-policy set \
   --yearly-retention P7Y
 ```
 
-## 🔒 安全最佳实践
+## 🔒 Security Best Practices
 
-### 1. 网络安全
+### 1. Network Security
 
 ```bash
-# 配置私有端点
+# Configure private endpoints
 az network private-endpoint create \
   --resource-group $RESOURCE_GROUP \
   --name bidone-sql-private-endpoint \
@@ -696,69 +554,69 @@ az network private-endpoint create \
   --connection-name bidone-sql-connection
 ```
 
-### 2. 密钥轮换
+### 2. Key Rotation
 
 ```bash
-# 定期轮换API密钥
+# Regularly rotate API keys
 az keyvault secret set \
   --vault-name $KEY_VAULT_NAME \
   --name "ServiceBus-ConnectionString" \
   --value "$(az servicebus namespace authorization-rule keys renew --resource-group $RESOURCE_GROUP --namespace-name $SERVICEBUS_NAMESPACE --name RootManageSharedAccessKey --key PrimaryKey --query primaryConnectionString -o tsv)"
 ```
 
-## 🚨 故障排除
+## 🚨 Troubleshooting
 
-### 常见问题和解决方案
+### Common Issues and Solutions
 
-#### 1. 容器启动失败
+#### 1. Container Startup Failures
 
 ```bash
-# 查看容器日志
+# View container logs
 az containerapp logs show \
   --name external-order-api \
   --resource-group $RESOURCE_GROUP \
   --follow
 
-# 检查配置
+# Check configuration
 az containerapp show \
   --name external-order-api \
   --resource-group $RESOURCE_GROUP \
   --query "properties.template.containers[0]"
 ```
 
-#### 2. Function App部署失败
+#### 2. Function App Deployment Failures
 
 ```bash
-# 查看部署日志
+# View deployment logs
 func azure functionapp list-functions $ORDER_FUNC_NAME
 
-# 检查配置
+# Check configuration
 az functionapp config appsettings list \
   --name $ORDER_FUNC_NAME \
   --resource-group $RESOURCE_GROUP
 ```
 
-#### 3. 数据库连接问题
+#### 3. Database Connection Issues
 
 ```bash
-# 测试连接
+# Test connection
 az sql db show-connection-string \
   --client sqlcmd \
   --server $SQL_SERVER_NAME \
   --name BidOneDB
 
-# 检查防火墙规则
+# Check firewall rules
 az sql server firewall-rule list \
   --resource-group $RESOURCE_GROUP \
   --server $SQL_SERVER_NAME
 ```
 
-## 💰 成本优化
+## 💰 Cost Optimization
 
-### 自动扩缩容配置
+### Auto-scaling Configuration
 
 ```bash
-# 配置Container Apps自动扩缩容
+# Configure Container Apps auto-scaling
 az containerapp update \
   --name external-order-api \
   --resource-group $RESOURCE_GROUP \
@@ -769,10 +627,10 @@ az containerapp update \
   --scale-rule-http-concurrent-requests 100
 ```
 
-### 成本监控
+### Cost Monitoring
 
 ```bash
-# 设置预算告警
+# Set budget alerts
 az consumption budget create \
   --resource-group $RESOURCE_GROUP \
   --budget-name bidone-monthly-budget \
@@ -782,66 +640,66 @@ az consumption budget create \
   --notifications amount=400 operator=GreaterThan contact-emails="admin@company.com"
 ```
 
-## 📋 部署检查清单
+## 📋 Deployment Checklist
 
-### 🏠 本地开发环境
-- [ ] Docker Desktop已安装并运行
-- [ ] .NET 8.0 SDK已安装
-- [ ] 项目代码已克隆
-- [ ] `./docker-dev.sh start` 执行成功
-- [ ] 服务健康检查通过：`./docker-dev.sh status`
-- [ ] AI功能测试正常（模拟模式或真实OpenAI）
+### 🏠 Local Development Environment
+- [ ] Docker Desktop installed and running
+- [ ] .NET 8.0 SDK installed
+- [ ] Project code cloned
+- [ ] `./docker-dev.sh start` executed successfully
+- [ ] Service health checks passed: `./docker-dev.sh status`
+- [ ] AI functionality tested normally (simulation mode or real OpenAI)
 
-### ☁️ Azure部署前检查
-- [ ] Azure CLI已安装并登录
-- [ ] 订阅权限确认（贡献者角色）
-- [ ] 资源组创建
-- [ ] 参数文件配置
-- [ ] OpenAI API Key准备（可选，否则使用智能模拟）
-- [ ] 本地环境验证通过
+### ☁️ Pre-Azure Deployment Checks
+- [ ] Azure CLI installed and logged in
+- [ ] Subscription permissions confirmed (Contributor role)
+- [ ] Resource group created
+- [ ] Parameter files configured
+- [ ] OpenAI API Key prepared (optional, otherwise uses intelligent simulation)
+- [ ] Local environment verification passed
 
-### 🚀 部署过程检查
-- [ ] 基础设施部署成功（Bicep模板）
-- [ ] 容器镜像构建和推送到ACR
-- [ ] Container Apps部署成功
-- [ ] Azure Functions部署成功
-- [ ] 数据库初始化完成
-- [ ] Key Vault配置和密钥设置
-- [ ] Service Bus和Event Grid配置
+### 🚀 Deployment Process Checks
+- [ ] Infrastructure deployment successful (Bicep template)
+- [ ] Container images built and pushed to ACR
+- [ ] Container Apps deployment successful
+- [ ] Azure Functions deployment successful
+- [ ] Database initialization completed
+- [ ] Key Vault configuration and secret setup
+- [ ] Service Bus and Event Grid configuration
 
-### ✅ 部署后验证
-- [ ] API健康检查通过
-- [ ] 数据库连接正常
-- [ ] Service Bus消息流验证
-- [ ] AI功能端到端测试
-- [ ] Application Insights监控数据
-- [ ] 日志聚合和查询正常
-- [ ] 告警规则触发测试
-- [ ] 安全配置和访问控制确认
+### ✅ Post-Deployment Verification
+- [ ] API health checks passed
+- [ ] Database connections normal
+- [ ] Service Bus message flow verified
+- [ ] AI functionality end-to-end testing
+- [ ] Application Insights monitoring data
+- [ ] Log aggregation and querying normal
+- [ ] Alert rule trigger testing
+- [ ] Security configuration and access control confirmed
 
-### 🔄 开发工作流验证
-- [ ] 本地开发环境可重现生产问题
-- [ ] `docker-dev.sh rebuild` 功能正常
-- [ ] CI/CD流水线配置（如使用GitHub Actions）
-- [ ] 回滚计划准备
+### 🔄 Development Workflow Verification
+- [ ] Local development environment can reproduce production issues
+- [ ] `docker-dev.sh rebuild` functionality normal
+- [ ] CI/CD pipeline configured (if using GitHub Actions)
+- [ ] Rollback plan prepared
 
-## 🎯 下一步
+## 🎯 Next Steps
 
-完成部署后，建议进行以下操作：
+After completing deployment, it's recommended to perform the following:
 
-1. **配置监控和告警** - 设置关键指标的监控和告警
-2. **安全加固** - 实施网络安全、访问控制等安全措施
-3. **性能优化** - 根据实际使用情况调整资源配置
-4. **备份策略** - 配置数据备份和灾难恢复计划
-5. **文档更新** - 更新运维文档和故障排除指南
+1. **Configure Monitoring and Alerts** - Set up monitoring and alerts for key metrics
+2. **Security Hardening** - Implement network security, access control, and other security measures
+3. **Performance Optimization** - Adjust resource configuration based on actual usage
+4. **Backup Strategy** - Configure data backup and disaster recovery plans
+5. **Documentation Updates** - Update operational documentation and troubleshooting guides
 
-## 📞 技术支持
+## 📞 Technical Support
 
-如需帮助，请参考：
-- **故障排除指南**: [troubleshooting.md](troubleshooting.md)
-- **开发者指南**: [developer-guide.md](developer-guide.md)
-- **项目维护者**: guangliang.yang@hotmail.com
+For assistance, please refer to:
+- **Troubleshooting Guide**: [troubleshooting.md](troubleshooting.md)
+- **Developer Guide**: [developer-guide.md](developer-guide.md)
+- **Project Maintainer**: guangliang.yang@hotmail.com
 
 ---
 
-**部署成功后，您将拥有一个完整的云原生AI智能客户沟通系统！** 🎉
+**After successful deployment, you will have a complete cloud-native AI-powered customer communication system!** 🎉

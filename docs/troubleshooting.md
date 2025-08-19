@@ -1,183 +1,183 @@
-# BidOne Integration Platform - 故障排除指南
+# BidOne Integration Platform - Troubleshooting Guide
 
-## 🎯 概述
+## 🎯 Overview
 
-本文档提供 BidOne Integration Platform 常见问题的诊断和解决方案，基于实际实现的组件和配置。
+This document provides diagnosis and solutions for common issues with the BidOne Integration Platform, based on actual implemented components and configurations.
 
-## 🔧 快速诊断工具
+## 🔧 Quick Diagnostic Tools
 
-### 系统健康检查
+### System Health Check
 
 ```bash
 #!/bin/bash
-# health-check.sh - 快速健康状态检查
+# health-check.sh - Quick health status check
 
-echo "=== BidOne Integration Platform 健康检查 ==="
-echo "检查时间: $(date)"
+echo "=== BidOne Integration Platform Health Check ==="
+echo "Check time: $(date)"
 
-# 检查本地服务状态
-echo "1. 本地服务状态..."
+# Check local service status
+echo "1. Local service status..."
 docker-compose ps
 
-# 检查API端点
-echo -e "\n2. API健康检查..."
-curl -f http://localhost:8080/health || echo "External Order API: 失败"
-curl -f http://localhost:8081/health || echo "Internal System API: 失败"
+# Check API endpoints
+echo -e "\n2. API health check..."
+curl -f http://localhost:8080/health || echo "External Order API: Failed"
+curl -f http://localhost:8081/health || echo "Internal System API: Failed"
 
-echo -e "\n=== 检查完成 ==="
+echo -e "\n=== Check completed ==="
 ```
 
-## 🐛 常见问题
+## 🐛 Common Issues
 
-### 1. 容器启动失败
+### 1. Container Startup Failures
 
-**症状**: Docker容器无法启动或反复重启
+**Symptoms**: Docker containers fail to start or restart repeatedly
 
-**诊断步骤**:
+**Diagnostic Steps**:
 ```bash
-# 查看容器日志
+# View container logs
 docker-compose logs external-order-api
 docker-compose logs internal-system-api
 
-# 检查容器状态
+# Check container status
 docker-compose ps
 ```
 
-**常见原因**:
+**Common Causes**:
 
-#### a) 端口冲突
+#### a) Port Conflicts
 ```bash
-# 检查端口占用
+# Check port usage
 netstat -tulpn | grep :8080
 netstat -tulpn | grep :8081
 
-# 解决方案：修改 docker-compose.yml 中的端口映射
+# Solution: Modify port mapping in docker-compose.yml
 ```
 
-#### b) 数据库连接失败
+#### b) Database Connection Failures
 ```bash
-# 确保数据库服务已启动
+# Ensure database service is started
 docker-compose up sqlserver -d
 
-# 检查连接字符串配置
+# Check connection string configuration
 cat src/InternalSystemApi/appsettings.json
 ```
 
-### 2. Service Bus 连接问题
+### 2. Service Bus Connection Issues
 
-**症状**: Azure Functions 无法接收 Service Bus 消息
+**Symptoms**: Azure Functions cannot receive Service Bus messages
 
-**解决方案**:
+**Solution**:
 ```bash
-# 检查连接字符串配置
+# Check connection string configuration
 cat src/OrderIntegrationFunction/local.settings.json
 
-# 本地开发环境使用模拟器
-# 确保在 docker-compose.yml 中启用了 Service Bus 模拟器
+# Local development environment uses emulator
+# Ensure Service Bus emulator is enabled in docker-compose.yml
 ```
 
-### 3. AI 功能无响应
+### 3. AI Functionality Unresponsive
 
-**症状**: CustomerCommunicationFunction 处理高价值错误时无响应
+**Symptoms**: CustomerCommunicationFunction does not respond when processing high-value errors
 
-**诊断步骤**:
+**Diagnostic Steps**:
 ```csharp
-// 检查 LangChainService.cs 中的配置
-// 如果没有 OpenAI API Key，系统会使用智能模拟模式
+// Check configuration in LangChainService.cs
+// If no OpenAI API Key, system will use intelligent simulation mode
 ```
 
-**解决方案**:
-- 本地开发：使用内置的智能模拟响应
-- 生产环境：配置 OpenAI API Key
+**Solution**:
+- Local development: Use built-in intelligent simulation responses
+- Production environment: Configure OpenAI API Key
 
-### 4. 数据库迁移问题
+### 4. Database Migration Issues
 
-**症状**: Entity Framework 迁移失败
+**Symptoms**: Entity Framework migration failures
 
-**解决方案**:
+**Solution**:
 ```bash
-# 重新创建数据库
+# Recreate database
 docker-compose down
 docker-compose up sqlserver -d
 sleep 10
 
-# 运行迁移
+# Run migration
 cd src/InternalSystemApi
 dotnet ef database update
 ```
 
-### 5. Grafana 仪表板无数据
+### 5. Grafana Dashboard No Data
 
-**症状**: Grafana 显示 "No data" 
+**Symptoms**: Grafana shows "No data"
 
-**解决方案**:
+**Solution**:
 ```bash
-# 确保 Prometheus 正在收集指标
+# Ensure Prometheus is collecting metrics
 curl http://localhost:9090/metrics
 
-# 检查 Grafana 数据源配置
-# 访问 http://localhost:3000
-# 默认账号: admin/admin
+# Check Grafana data source configuration
+# Access http://localhost:3000
+# Default account: admin/admin
 ```
 
-## 📊 监控查询
+## 📊 Monitoring Queries
 
-### Prometheus 查询示例
+### Prometheus Query Examples
 
 ```promql
-# API 请求率
+# API request rate
 rate(http_requests_total[5m])
 
-# 错误率
+# Error rate
 rate(http_requests_total{status=~"5.."}[5m]) / rate(http_requests_total[5m])
 
-# 响应时间
+# Response time
 histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m]))
 ```
 
-### 应用日志查询
+### Application Log Queries
 
 ```bash
-# 查看最近的错误日志
+# View recent error logs
 docker-compose logs external-order-api | grep -i error | tail -20
 
-# 查看 AI 处理日志
+# View AI processing logs
 docker-compose logs customer-communication-function | grep -i "high-value"
 ```
 
-## 🔧 开发环境重置
+## 🔧 Development Environment Reset
 
-### 完全重置环境
+### Complete Environment Reset
 
 ```bash
 #!/bin/bash
-# reset-environment.sh - 完全重置开发环境
+# reset-environment.sh - Complete development environment reset
 
-echo "停止所有服务..."
+echo "Stopping all services..."
 docker-compose down -v
 
-echo "清理 Docker 资源..."
+echo "Cleaning Docker resources..."
 docker system prune -f
 
-echo "重新构建镜像..."
+echo "Rebuilding images..."
 docker-compose build --no-cache
 
-echo "启动服务..."
+echo "Starting services..."
 docker-compose up -d
 
-echo "等待服务就绪..."
+echo "Waiting for services to be ready..."
 sleep 30
 
-echo "运行健康检查..."
+echo "Running health check..."
 ./scripts/health-check.sh
 ```
 
-## 📝 调试技巧
+## 📝 Debugging Tips
 
-### 1. 启用详细日志
+### 1. Enable Detailed Logging
 
 ```csharp
-// 在 appsettings.Development.json 中
+// In appsettings.Development.json
 {
   "Logging": {
     "LogLevel": {
@@ -189,58 +189,58 @@ echo "运行健康检查..."
 }
 ```
 
-### 2. 使用断点调试
+### 2. Use Breakpoint Debugging
 
 ```bash
-# 使用 VS Code 调试
-# 确保 launch.json 配置正确
-# 可以直接附加到运行中的容器
+# Use VS Code debugging
+# Ensure launch.json is configured correctly
+# Can directly attach to running containers
 ```
 
-### 3. 消息追踪
+### 3. Message Tracing
 
 ```csharp
-// 在关键处理点添加追踪日志
+// Add trace logs at key processing points
 _logger.LogInformation("🔍 Processing order: {OrderId} at stage: {Stage}", 
     order.Id, "Validation");
 ```
 
-## 🆘 获取帮助
+## 🆘 Getting Help
 
-### 日志收集脚本
+### Log Collection Script
 
 ```bash
 #!/bin/bash
-# collect-logs.sh - 收集诊断信息
+# collect-logs.sh - Collect diagnostic information
 
 LOG_DIR="./logs/$(date +%Y%m%d_%H%M%S)"
 mkdir -p $LOG_DIR
 
-echo "收集系统信息..."
+echo "Collecting system information..."
 docker-compose ps > $LOG_DIR/containers.txt
 docker-compose logs > $LOG_DIR/all-logs.txt
 
-echo "收集配置信息..."
+echo "Collecting configuration information..."
 cp docker-compose.yml $LOG_DIR/
 cp -r config/ $LOG_DIR/
 
-echo "日志已收集到: $LOG_DIR"
+echo "Logs collected to: $LOG_DIR"
 ```
 
-### 支持联系方式
+### Support Contact Information
 
-- **项目维护者**: Ricky Yang
-- **邮箱**: guangliang.yang@hotmail.com
-- **文档**: 查看 `/docs` 目录中的其他文档
+- **Project Maintainer**: Ricky Yang
+- **Email**: guangliang.yang@hotmail.com
+- **Documentation**: See other documents in `/docs` directory
 
 ---
 
-## 💡 最佳实践
+## 💡 Best Practices
 
-1. **定期检查**: 使用健康检查脚本定期验证系统状态
-2. **日志监控**: 关注 ERROR 和 WARNING 级别的日志
-3. **性能监控**: 使用 Grafana 仪表板监控关键指标
-4. **版本控制**: 保持配置文件在版本控制中
-5. **文档更新**: 遇到新问题时及时更新此文档
+1. **Regular Checks**: Use health check scripts to regularly verify system status
+2. **Log Monitoring**: Pay attention to ERROR and WARNING level logs
+3. **Performance Monitoring**: Use Grafana dashboards to monitor key metrics
+4. **Version Control**: Keep configuration files in version control
+5. **Documentation Updates**: Update this document promptly when encountering new issues
 
-如果遇到此文档未涵盖的问题，请联系项目维护者或创建 GitHub Issue。
+If you encounter issues not covered in this document, please contact the project maintainer or create a GitHub Issue.

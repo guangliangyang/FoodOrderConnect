@@ -1,96 +1,96 @@
-# BidOne Integration Platform - 端口配置说明
+# BidOne Integration Platform - Port Configuration Guide
 
-## 📋 端口分配表
+## 📋 Port Allocation Table
 
-### 🚀 应用服务端口
-| 服务 | 本地开发模式 | 容器化模式 | HTTPS (本地) | 说明 |
-|------|-------------|-----------|-------------|------|
-| **External Order API** | http://localhost:5001 | http://localhost:5001 | https://localhost:7001 | 外部订单接收API |
-| **Internal System API** | http://localhost:5002 | http://localhost:5002 | https://localhost:7002 | 内部系统API |
-| **Order Integration Function** | http://localhost:7071 | N/A (本地运行) | N/A | 订单处理函数 |
-| **AI Communication Function** | http://localhost:7072 | N/A (本地运行) | N/A | AI智能沟通函数 |
+### 🚀 Application Service Ports
+| Service | Local Development Mode | Containerized Mode | HTTPS (Local) | Description |
+|---------|----------------------|-------------------|---------------|-------------|
+| **External Order API** | http://localhost:5001 | http://localhost:5001 | https://localhost:7001 | External order receipt API |
+| **Internal System API** | http://localhost:5002 | http://localhost:5002 | https://localhost:7002 | Internal system API |
+| **Order Integration Function** | http://localhost:7071 | N/A (runs locally) | N/A | Order processing function |
+| **AI Communication Function** | http://localhost:7072 | N/A (runs locally) | N/A | AI intelligent communication function |
 
-### 🏗️ 基础设施服务端口
-| 服务 | 端口 | 用途 | 访问地址 |
-|------|------|------|----------|
-| **SQL Server** | 1433 | 主数据库 | localhost:1433 |
-| **Redis** | 6380 | 缓存 | localhost:6380 |
-| **Cosmos DB** | 8081 | 文档数据库 | https://localhost:8081 |
-| **Service Bus** | 5672 | 消息队列 | localhost:5672 |
-| **Prometheus** | 9090 | 指标收集 | http://localhost:9090 |
-| **Grafana** | 3000 | 监控仪表板 | http://localhost:3000 |
-| **Jaeger** | 16686 | 链路追踪 | http://localhost:16686 |
-| **Nginx** | 80/443 | 反向代理 | http://localhost |
+### 🏗️ Infrastructure Service Ports
+| Service | Port | Purpose | Access Address |
+|---------|------|---------|----------------|
+| **SQL Server** | 1433 | Main database | localhost:1433 |
+| **Redis** | 6380 | Cache | localhost:6380 |
+| **Cosmos DB** | 8081 | Document database | https://localhost:8081 |
+| **Service Bus** | 5672 | Message queue | localhost:5672 |
+| **Prometheus** | 9090 | Metrics collection | http://localhost:9090 |
+| **Grafana** | 3000 | Monitoring dashboard | http://localhost:3000 |
+| **Jaeger** | 16686 | Distributed tracing | http://localhost:16686 |
+| **Nginx** | 80/443 | Reverse proxy | http://localhost |
 
-## 🔧 问题解决
+## 🔧 Problem Resolution
 
-### 解决的问题：端口冲突
+### Solved Issues: Port Conflicts
 
-#### 问题1：API端口冲突
-- **问题**: 两个API项目 `dotnet run` 都默认使用5000端口
-- **影响**: 无法同时在本地运行两个API
-- **解决方案**: 创建 `launchSettings.json` 配置文件，分配专用端口
+#### Issue 1: API Port Conflicts
+- **Problem**: Both API projects using `dotnet run` default to port 5000
+- **Impact**: Cannot run both APIs locally simultaneously
+- **Solution**: Create `launchSettings.json` configuration files, assign dedicated ports
 
-#### 问题2：Redis端口冲突  
-- **问题**: Mac本地安装的Redis占用6379端口，与Docker Redis冲突
-- **影响**: 应用连接到错误的Redis实例，导致数据不一致
-- **解决方案**: Docker Redis映射到6380端口，避免与本地Redis(6379)冲突
+#### Issue 2: Redis Port Conflicts  
+- **Problem**: Locally installed Redis occupies port 6379, conflicts with Docker Redis
+- **Impact**: Application connects to wrong Redis instance, causing data inconsistency
+- **Solution**: Map Docker Redis to port 6380, avoiding conflict with local Redis (6379)
 
-### 端口分配策略
-1. **API服务端口分离**:
+### Port Allocation Strategy
+1. **API Service Port Separation**:
    - External Order API: 5001/7001
    - Internal System API: 5002/7002
-2. **Redis端口分离**:
-   - 本地Redis: 6379 (如果安装)
+2. **Redis Port Separation**:
+   - Local Redis: 6379 (if installed)
    - Docker Redis: 6380
-3. **统一容器和本地端口**: 确保开发体验一致
+3. **Unified Container and Local Ports**: Ensure consistent development experience
 
-### 配置文件位置
+### Configuration File Locations
 ```
 src/ExternalOrderApi/Properties/launchSettings.json
 src/InternalSystemApi/Properties/launchSettings.json
 ```
 
-## 🚀 使用方式
+## 🚀 Usage
 
-### 混合开发模式 (推荐日常开发)
+### Hybrid Development Mode (Recommended for daily development)
 ```bash
-# 1. 启动基础设施
+# 1. Start infrastructure
 ./docker-dev.sh infra
 
-# 2. 启动API服务 (不同端口)
+# 2. Start API services (different ports)
 cd src/ExternalOrderApi && dotnet run     # → http://localhost:5001
 cd src/InternalSystemApi && dotnet run    # → http://localhost:5002
 
-# 3. 启动Functions (不同端口)
+# 3. Start Functions (different ports)
 cd src/OrderIntegrationFunction && func start              # → http://localhost:7071
 cd src/CustomerCommunicationFunction && func start --port 7072  # → http://localhost:7072
 ```
 
-### 完全容器化模式 (推荐演示)
+### Complete Containerized Mode (Recommended for demos)
 ```bash
-# 一键启动，端口自动映射
+# One-click start, ports automatically mapped
 ./docker-dev.sh start
 
-# API服务通过容器映射到相同端口
+# API services mapped to same ports through containers
 # External Order API: http://localhost:5001
 # Internal System API: http://localhost:5002
 ```
 
-## ✅ 验证端口配置
+## ✅ Verify Port Configuration
 
-使用测试脚本验证端口是否正确配置：
+Use test script to verify ports are correctly configured:
 ```bash
 ./test-ports.sh
 ```
 
-## 🎯 设计优势
+## 🎯 Design Advantages
 
-1. **端口分离**: 避免了默认5000端口冲突
-2. **一致性**: 本地开发和容器化模式使用相同端口
-3. **可预测性**: 每个服务都有固定的端口分配
-4. **开发友好**: 清晰的端口映射，便于调试和测试
+1. **Port Separation**: Avoided default port 5000 conflicts
+2. **Consistency**: Local development and containerized modes use same ports
+3. **Predictability**: Each service has fixed port allocation
+4. **Developer Friendly**: Clear port mapping, convenient for debugging and testing
 
 ---
 
-**注意**: Azure Functions 始终在本地运行（不容器化），因为它们需要 Azure Functions Runtime。
+**Note**: Azure Functions always run locally (not containerized) because they require the Azure Functions Runtime.
