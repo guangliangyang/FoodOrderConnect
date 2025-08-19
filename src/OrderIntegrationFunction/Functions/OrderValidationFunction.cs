@@ -91,6 +91,11 @@ public class OrderValidationFunction
         }
     }
 
+    // 🔄 双处理架构说明: 这是处理路径1 (Azure Functions 链式处理)
+    // 同时还有路径2 (Azure Logic Apps) 也在监听相同的 order-received 队列
+    // 两条路径并行处理，用于演示不同的 Azure 集成模式:
+    // - Functions 路径: 轻量级无服务器处理 (本函数所在路径)
+    // - Logic Apps 路径: 可视化工作流编排
     [Function("ValidateOrderFromServiceBus")]
     [ServiceBusOutput("order-validated", Connection = "ServiceBusConnection")]
     public async Task<string> ValidateOrderFromServiceBus(

@@ -47,10 +47,34 @@ This is a modern cloud-native architecture demonstration project showcasing an e
 | **Internal System API** | .NET 8.0, Entity Framework | Internal system integration and data management |
 | **Order Integration Function** | Azure Functions v4 | Order validation and data enrichment |
 | **Customer Communication Function** | Azure Functions v4, LangChain | 🤖 **AI-Powered Customer Communication** |
+| **Azure Logic Apps** | Logic Apps Standard | Enterprise workflow orchestration (optional) |
 | **Message Bus** | Azure Service Bus | Reliable asynchronous messaging |
 | **Event Grid** | Azure Event Grid | Real-time event-driven communication |
 | **AI Services** | OpenAI API, LangChain | Intelligent analysis and content generation |
 | **Monitoring Suite** | Prometheus, Grafana, App Insights | Full-stack monitoring and business insights |
+
+### 🔄 Dual Processing Architecture
+
+This project demonstrates **two parallel processing paths** for educational and technology showcase purposes:
+
+#### Path 1: Azure Functions Chain (Recommended for Development)
+```
+order-received → OrderValidationFunction → order-validated → OrderEnrichmentFunction → order-processing → InternalSystemApi
+```
+
+#### Path 2: Logic Apps Workflow (Optional for Production)
+```
+order-received → Logic App → HTTP calls to Functions → InternalSystemApi → order-confirmed
+```
+
+**Design Intent**: Both paths process the same `order-received` queue to demonstrate different Azure integration patterns. This dual approach showcases:
+- **Functions Path**: Fast, lightweight serverless processing
+- **Logic Apps Path**: Visual workflow management and enterprise integration
+
+**Developer Guidance**:
+- **Local Development**: Use Functions path (simpler, faster debugging)
+- **Production**: Choose based on team preference and enterprise requirements
+- **Monitoring**: Both paths are fully monitored and traced
 
 ### 🧠 AI-Driven Architecture
 
@@ -343,6 +367,7 @@ dotnet test                     # Run tests
 | 📄 [Architecture Design](docs/architecture.md) | System architecture and design principles | Architects, Developers |
 | 🚀 [Deployment Guide](docs/deployment-guide.md) | Local and cloud deployment instructions | DevOps, Operations |
 | 🎯 [Demo Guide](docs/demo-guide.md) | Complete demo scripts and scenarios | Product Managers, Sales |
+| 🔄 [Processing Modes Guide](docs/processing-modes-guide.md) | How to choose between Functions and Logic Apps | Developers, Architects |
 | 🔧 [Troubleshooting](docs/troubleshooting.md) | Common problem solutions | Developers, Operations |
 
 ## 💡 Technical Highlights Showcase

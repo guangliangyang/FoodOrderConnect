@@ -74,6 +74,10 @@ public class OrderService : IOrderService
                 CorrelationId = correlationId
             };
 
+            // 🔄 双处理架构: 消息发布到 order-received 队列，将被两条并行路径处理:
+            // 路径1: Azure Functions 链式处理 (OrderValidationFunction → OrderEnrichmentFunction → InternalSystemApi)
+            // 路径2: Azure Logic Apps 工作流编排 (Logic App → HTTP调用 → InternalSystemApi)
+            // 这种设计用于技术能力演示，展示不同的 Azure 集成模式
             await _messagePublisher.PublishAsync(order, "order-received", cancellationToken);
             await _messagePublisher.PublishEventAsync(orderReceivedEvent, cancellationToken);
 

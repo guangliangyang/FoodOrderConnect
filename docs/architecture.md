@@ -4,6 +4,30 @@
 
 BidOne Integration Platform 是一个展示**现代云原生架构与 AI 智能集成**的企业级订单处理系统，核心理念是 **"Never Lose an Order"** + **"AI-Powered Customer Experience"**。
 
+### 🔄 双处理架构设计说明
+
+**重要说明**: 本项目包含两条并行的订单处理路径，这是为了技术能力演示而设计的架构：
+
+#### 处理路径 1: Azure Functions 链式处理 (推荐开发模式)
+```
+订单接收 → [order-received 队列] → OrderValidationFunction → [order-validated 队列] → OrderEnrichmentFunction → [order-processing 队列] → InternalSystemApi
+```
+
+#### 处理路径 2: Azure Logic Apps 工作流编排 (可选生产模式)  
+```
+订单接收 → [order-received 队列] → Logic App 工作流 → HTTP 调用 Functions → InternalSystemApi → [order-confirmed 队列]
+```
+
+**设计意图**:
+- **技术展示**: 演示 Azure 生态中不同的集成模式和最佳实践
+- **灵活选择**: 开发团队可根据具体需求选择合适的处理模式
+- **学习目的**: 对比无服务器函数 vs 可视化工作流的优劣势
+
+**使用建议**:
+- **本地开发**: 优先使用 Functions 路径 (调试简单，启动快速)
+- **生产环境**: 可根据团队技术栈和企业需求选择 Logic Apps 路径
+- **监控支持**: 两条路径都有完整的监控和追踪能力
+
 ## 🏛️ 设计原则
 
 ### 核心原则

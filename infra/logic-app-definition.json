@@ -1,6 +1,12 @@
 {
     "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
     "contentVersion": "1.0.0.0",
+    "// 🔄 双处理架构说明: 这是处理路径2 (Azure Logic Apps 工作流编排)": "",
+    "// 同时还有路径1 (Azure Functions链式处理) 也在监听相同的 order-received 队列": "",
+    "// 两条路径并行处理，用于演示不同的 Azure 集成模式:": "",
+    "// - Logic Apps 路径: 可视化工作流编排 (本工作流所在路径)": "",
+    "// - Functions 路径: 轻量级无服务器处理": "",
+    "// 这种设计用于技术能力演示，展示企业级工作流 vs 微服务函数的不同优势": "",
     "parameters": {
         "serviceBusConnectionString": {
             "type": "string",
