@@ -297,7 +297,329 @@ public async Task<IActionResult> EnrichOrderData(
 }
 ```
 
-### 4. Internal System API
+### 4. OrderIntegrationFunction - 订单处理中间件
+
+**职责**: 订单验证、数据丰富化和业务流程编排
+
+**技术栈**:
+- Azure Functions v4 (.NET 8.0)
+- Service Bus Triggers
+- Event Grid Triggers
+- Entity Framework Core (验证数据库)
+- Cosmos DB (产品目录)
+
+**核心组件**:
+
+#### OrderValidationFunction
+```csharp
+[Function("ValidateOrderFromServiceBus")]
+[ServiceBusOutput("order-validated", Connection = "ServiceBusConnection")]
+public async Task<string> ValidateOrderFromServiceBus(
+    [ServiceBusTrigger("order-received", Connection = "ServiceBusConnection")] string orderMessage)
+{
+    // 1. 基础数据验证
+    var validationResult = await _validationService.ValidateOrderAsync(order);
+    
+    // 2. 高价值错误检测
+    if (!validationResult.IsValid && IsHighValueError(order, validationResult))
+    {
+        await PublishHighValueErrorEvent(order, validationResult);
+    }
+    
+    // 3. 发送到下一阶段
+    return JsonSerializer.Serialize(response);
+}
+```
+
+#### OrderEnrichmentFunction
+```csharp
+[Function("EnrichOrderData")]
+[ServiceBusOutput("order-processing", Connection = "ServiceBusConnection")]
+public async Task<string> EnrichOrderData(
+    [ServiceBusTrigger("order-validated", Connection = "ServiceBusConnection")] string orderMessage)
+{
+    // 1. 产品信息丰富化
+    await _enrichmentService.EnrichProductInformation(order);
+    
+    // 2. 价格计算和折扣应用
+    await _enrichmentService.CalculatePricing(order);
+    
+    // 3. 供应商分配
+    await _enrichmentService.AssignSupplier(order);
+    
+    return JsonSerializer.Serialize(enrichedOrder);
+}
+```
+
+#### DashboardMetricsProcessor
+```csharp
+[Function("DashboardMetricsProcessor")]
+public async Task ProcessDashboardEvents(
+    [EventGridTrigger] EventGridEvent eventGridEvent)
+{
+    // 实时业务指标更新
+    await UpdateDashboardMetrics(eventGridEvent);
+}
+```
+
+**关键设计决策**:
+- **异步处理**: 提高系统吞吐量和响应速度
+- **职责分离**: 验证、丰富化、指标处理各自独立
+- **错误隔离**: 每个 Function 独立扩缩容和故障恢复
+- **智能检测**: 自动识别高价值订单错误并触发 AI 沟通
+- **实时监控**: 通过 Event Grid 实现实时业务指标更新
+
+### 5. BidOne.Shared - 共享基础设施
+
+**职责**: 为整个平台提供统一的领域模型、DDD 基础设施和跨领域关注点
+
+**技术栈**:
+- .NET 8.0 Class Library
+- FluentValidation (数据验证)
+- Prometheus.NET (指标收集)
+- Azure.Messaging.EventGrid (事件发布)
+- System.Text.Json (序列化)
+
+**核心架构**:
+
+#### 领域驱动设计 (DDD) 基础设施
+
+**AggregateRoot - 聚合根基类**
+```csharp
+public abstract class AggregateRoot : Entity
+{
+    private readonly List<IDomainEvent> _domainEvents = new();
+    
+    [NotMapped]
+    public IReadOnlyCollection<IDomainEvent> DomainEvents => _domainEvents.AsReadOnly();
+    
+    protected void AddDomainEvent(IDomainEvent domainEvent)
+    {
+        _domainEvents.Add(domainEvent);
+    }
+    
+    public void MarkEventsAsCommitted()
+    {
+        _domainEvents.Clear();
+    }
+}
+```
+
+**ValueObject - 值对象基类**
+```csharp
+// 强类型订单标识符
+public sealed class OrderId : ValueObject
+{
+    public string Value { get; }
+    
+    public static OrderId CreateNew() => 
+        new($"ORD-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString("N")[..8].ToUpper()}");
+    
+    public static implicit operator string(OrderId orderId) => orderId.Value;
+    public static implicit operator OrderId(string value) => Create(value);
+}
+
+// 金额值对象，支持币种和运算
+public sealed class Money : ValueObject
+{
+    public decimal Amount { get; }
+    public string Currency { get; }
+    
+    public Money Add(Money other) => new(Amount + other.Amount, Currency);
+    public Money Multiply(decimal multiplier) => new(Amount * multiplier, Currency);
+    public bool IsGreaterThan(Money other) => Amount > other.Amount;
+}
+```
+
+#### 订单聚合根设计
+
+**完整的业务逻辑封装**
+```csharp
+public class Order : AggregateRoot
+{
+    public OrderId Id { get; set; }
+    public CustomerId CustomerId { get; set; }
+    public List<OrderItem> Items { get; set; } = new();
+    public OrderStatus Status { get; set; }
+    public Money TotalAmount { get; private set; } = Money.Zero();
+    public Dictionary<string, object> Metadata { get; private set; } = new();
+    
+    // 工厂方法
+    public static Order Create(CustomerId customerId)
+    {
+        var order = new Order(OrderId.CreateNew(), customerId);
+        order.AddDomainEvent(new OrderCreatedEvent(order.Id, customerId));
+        return order;
+    }
+    
+    // 业务方法 - 添加订单项
+    public void AddItem(ProductInfo productInfo, Quantity quantity, Money unitPrice)
+    {
+        if (Status != OrderStatus.Received)
+            throw new InvalidOperationException($"Cannot add items to order in status {Status}");
+        
+        var orderItem = OrderItem.Create(productInfo, quantity, unitPrice);
+        Items.Add(orderItem);
+        RecalculateTotalAmount();
+        UpdateTimestamp();
+    }
+    
+    // 业务方法 - 订单验证
+    public void Validate()
+    {
+        if (Status != OrderStatus.Received)
+            throw new InvalidOperationException($"Cannot validate order in status {Status}");
+        
+        if (!Items.Any())
+            throw new InvalidOperationException("Cannot validate order without items");
+        
+        Status = OrderStatus.Validating;
+        UpdateTimestamp();
+        AddDomainEvent(new OrderValidationStartedEvent(Id));
+    }
+    
+    // 业务方法 - 订单确认
+    public void Confirm(string supplierId)
+    {
+        if (Status != OrderStatus.Processing)
+            throw new InvalidOperationException($"Cannot confirm order from status {Status}");
+        
+        SupplierId = supplierId;
+        Status = OrderStatus.Confirmed;
+        ConfirmedAt = DateTime.UtcNow;
+        UpdateTimestamp();
+        AddDomainEvent(new OrderConfirmedEvent(Id, SupplierId, TotalAmount));
+    }
+    
+    // 业务规则查询
+    public bool CanBeCancelled()
+    {
+        return Status is OrderStatus.Received or OrderStatus.Validating or OrderStatus.Validated;
+    }
+    
+    public bool IsHighValue(decimal threshold = 1000m)
+    {
+        return TotalAmount.Amount > threshold;
+    }
+    
+    private void RecalculateTotalAmount()
+    {
+        TotalAmount = Items.Aggregate(Money.Zero(), (total, item) => total.Add(item.GetTotalPrice()));
+    }
+}
+```
+
+#### 事件驱动架构支持
+
+**集成事件基类**
+```csharp
+public abstract class IntegrationEvent
+{
+    public string Id { get; } = Guid.NewGuid().ToString();
+    public DateTime CreatedAt { get; } = DateTime.UtcNow;
+    public string EventType { get; protected set; } = string.Empty;
+    public string Source { get; set; } = string.Empty;
+    public string CorrelationId { get; set; } = string.Empty;
+    public Dictionary<string, object> Metadata { get; set; } = new();
+}
+```
+
+**具体业务事件**
+```csharp
+// 订单接收事件
+public class OrderReceivedEvent : IntegrationEvent
+{
+    public string OrderId { get; set; } = string.Empty;
+    public string CustomerId { get; set; } = string.Empty;
+    public DateTime ReceivedAt { get; set; }
+    public string SourceSystem { get; set; } = string.Empty;
+}
+
+// 高价值错误事件 (触发 AI 智能沟通)
+public class HighValueErrorEvent : IntegrationEvent
+{
+    public string OrderId { get; set; } = string.Empty;
+    public string CustomerId { get; set; } = string.Empty;
+    public string ErrorCategory { get; set; } = string.Empty;
+    public string ErrorMessage { get; set; } = string.Empty;
+    public decimal OrderValue { get; set; }
+    public string CustomerTier { get; set; } = string.Empty;
+    public DateTime ErrorOccurredAt { get; set; }
+    public Dictionary<string, object> ContextData { get; set; } = new();
+}
+```
+
+#### 监控指标系统
+
+**Prometheus 业务指标**
+```csharp
+public static class BusinessMetrics
+{
+    // 订单处理总数计数器
+    public static readonly Counter OrdersProcessed = Prometheus.Metrics
+        .CreateCounter("bidone_orders_processed_total", "订单处理总数",
+            new[] { "status", "service" });
+    
+    // 订单处理时间直方图
+    public static readonly Histogram OrderProcessingTime = Prometheus.Metrics
+        .CreateHistogram("bidone_order_processing_seconds", "订单处理时间(秒)",
+            new HistogramConfiguration
+            {
+                Buckets = Histogram.LinearBuckets(0.01, 0.05, 20),
+                LabelNames = new[] { "service", "operation" }
+            });
+    
+    // 当前待处理订单数量计量器
+    public static readonly Gauge PendingOrders = Prometheus.Metrics
+        .CreateGauge("bidone_pending_orders_count", "当前待处理订单数量",
+            new[] { "service" });
+    
+    // API 请求响应时间直方图
+    public static readonly Histogram ApiRequestDuration = Prometheus.Metrics
+        .CreateHistogram("bidone_api_request_duration_seconds", "API请求响应时间(秒)",
+            new HistogramConfiguration
+            {
+                Buckets = Histogram.ExponentialBuckets(0.001, 2, 15),
+                LabelNames = new[] { "method", "endpoint", "status" }
+            });
+}
+```
+
+#### 服务抽象接口
+
+**消息发布接口**
+```csharp
+public interface IMessagePublisher
+{
+    // 发布消息到指定队列
+    Task PublishAsync<T>(T message, string queueName, CancellationToken cancellationToken = default) 
+        where T : class;
+    
+    // 发布集成事件
+    Task PublishEventAsync<T>(T integrationEvent, CancellationToken cancellationToken = default) 
+        where T : IntegrationEvent;
+    
+    // 批量消息发布
+    Task PublishBatchAsync<T>(IEnumerable<T> messages, string queueName, CancellationToken cancellationToken = default) 
+        where T : class;
+}
+
+// 事件处理接口
+public interface IEventHandler<in T> where T : IntegrationEvent
+{
+    Task HandleAsync(T integrationEvent, CancellationToken cancellationToken = default);
+}
+```
+
+**关键设计决策**:
+- **统一业务模型**: 所有服务使用相同的 Order 聚合根，确保业务逻辑一致性
+- **强类型安全**: 值对象防止原始类型混淆，编译时捕获错误
+- **事件驱动解耦**: 通过集成事件实现服务间松耦合通信
+- **业务规则封装**: 领域方法封装复杂业务逻辑，避免贫血模型
+- **可观测性内置**: 监控指标嵌入到共享基础设施中
+- **向后兼容**: 保留原有属性访问器，支持渐进式重构
+
+### 6. Internal System API
 
 **职责**: 内部系统集成和订单状态管理
 
@@ -573,14 +895,205 @@ public string ProductId
 public decimal TotalPrice => GetTotalPrice().Amount;
 ```
 
-### 数据存储策略
+## 💾 数据架构设计
 
-| 数据类型 | 存储方案 | 原因 |
-|----------|----------|------|
-| 订单事务数据 | Azure SQL Database | ACID特性，强一致性 |
-| 产品目录 | Azure Cosmos DB | 高读取性能，全局分发 |
-| 用户会话 | Redis Cache | 快速访问，自动过期 |
-| 审计日志 | Azure Storage | 长期存储，成本优化 |
+### 多数据库架构概览
+
+本项目采用**多数据库架构**，针对不同数据特性和访问模式进行优化：
+
+#### 数据库系统分布
+
+```mermaid
+graph TB
+    subgraph "🏢 业务服务层"
+        EXT[ExternalOrderApi<br/>订单接收]
+        INT[InternalSystemApi<br/>业务处理]
+        FUNC[OrderIntegrationFunction<br/>验证丰富化]
+    end
+    
+    subgraph "💾 数据存储层"
+        SQL[(SQL Server<br/>BidOneDB<br/>🗄️ 关系型数据)]
+        COSMOS[(Cosmos DB<br/>BidOneDB/OrderEnrichment<br/>📦 文档数据)]
+        REDIS[(Redis Cache<br/>⚡ 内存缓存)]
+    end
+    
+    EXT --> REDIS
+    INT --> SQL
+    FUNC --> SQL
+    FUNC --> COSMOS
+```
+
+#### 数据库使用映射
+
+| 服务 | 数据库 | DbContext | 连接字符串 | 主要用途 |
+|------|--------|-----------|------------|----------|
+| **InternalSystemApi** | SQL Server | BidOneDbContext | DefaultConnection | 主业务数据、事务处理 |
+| **OrderIntegrationFunction** | SQL Server | OrderValidationDbContext | SqlConnectionString | 客户产品验证 |
+| **OrderIntegrationFunction** | Cosmos DB | ProductEnrichmentDbContext | CosmosDbConnectionString | 产品丰富化数据 |
+| **ExternalOrderApi** | Redis | - | Redis | 订单缓存、指标缓存 |
+
+### SQL Server (BidOneDB) - 主数据库
+
+#### InternalSystemApi 业务数据模型
+
+**主要实体**:
+```csharp
+// 核心业务实体
+public DbSet<OrderEntity> Orders { get; set; }           // 订单主表
+public DbSet<OrderItemEntity> OrderItems { get; set; }   // 订单项
+public DbSet<CustomerEntity> Customers { get; set; }     // 客户信息
+public DbSet<SupplierEntity> Suppliers { get; set; }     // 供应商
+public DbSet<ProductEntity> Products { get; set; }       // 产品主数据
+public DbSet<InventoryEntity> Inventory { get; set; }    // 库存管理
+
+// 系统实体
+public DbSet<OrderEventEntity> OrderEvents { get; set; } // 订单事件
+public DbSet<AuditLogEntity> AuditLogs { get; set; }     // 审计日志
+```
+
+**关键特性**:
+- **ACID 事务**: 确保数据一致性
+- **复杂关系**: 外键约束和级联操作
+- **JSON 支持**: Metadata 和 Properties 列
+- **自动审计**: 所有变更自动记录
+- **索引优化**: 多维度查询优化
+
+#### OrderIntegrationFunction 验证数据模型
+
+**轻量级实体**:
+```csharp
+public DbSet<Customer> Customers { get; set; }  // 验证用客户信息
+public DbSet<Product> Products { get; set; }    // 验证用产品信息
+```
+
+**设计目的**:
+- **快速验证**: 简化模型提升查询性能
+- **逻辑分离**: 验证逻辑与业务逻辑解耦
+- **独立扩展**: 可后续迁移到独立数据库
+
+### Azure Cosmos DB - 产品目录数据库
+
+#### 数据模型设计
+
+**容器**: OrderEnrichment
+
+**集合结构**:
+```csharp
+// 产品丰富化数据 (按 ProductId 分区)
+public class ProductEnrichmentData
+{
+    public string ProductId { get; set; }           // 分区键
+    public string Name { get; set; }
+    public string Category { get; set; }
+    public decimal Weight { get; set; }
+    public List<string> Allergens { get; set; }     // 过敏原信息
+    public NutritionalInfo NutritionalInfo { get; set; } // 营养信息
+}
+
+// 客户丰富化数据 (按 CustomerId 分区)
+public class CustomerEnrichmentData  
+{
+    public string CustomerId { get; set; }          // 分区键
+    public string CustomerTier { get; set; }        // 客户等级
+    public decimal CreditLimit { get; set; }        // 信用额度
+    public List<string> PreferredProducts { get; set; } // 偏好产品
+}
+
+// 供应商数据 (按 Name 分区)
+public class SupplierData
+{
+    public string Name { get; set; }                // 分区键
+    public List<string> Products { get; set; }      // 供应产品列表
+    public bool IsActive { get; set; }
+}
+```
+
+**分区策略**:
+- **ProductEnrichmentData**: 按 `ProductId` 分区，支持产品维度查询
+- **CustomerEnrichmentData**: 按 `CustomerId` 分区，支持客户维度查询  
+- **SupplierData**: 按 `Name` 分区，支持供应商管理
+
+**优势特性**:
+- **全球分布**: 多地域部署，就近访问
+- **弹性扩展**: 自动分区和吞吐量调整
+- **灵活模式**: NoSQL 文档结构，易于扩展
+- **最终一致性**: 适合读多写少的场景
+
+### Redis Cache - 高速缓存
+
+#### 缓存数据类型
+
+**订单状态缓存**:
+```csharp
+// 缓存键格式
+private static string GetOrderCacheKey(string orderId) => $"order:{orderId}";
+
+// 缓存策略
+var cacheOptions = new DistributedCacheEntryOptions
+{
+    SlidingExpiration = TimeSpan.FromHours(24),      // 24小时滑动过期
+    AbsoluteExpirationRelativeToNow = TimeSpan.FromDays(7) // 7天绝对过期
+};
+```
+
+**业务指标缓存**:
+```csharp
+// 实时指标缓存
+- "dashboard:orders:today:{yyyy-MM-dd}"     // 今日订单数
+- "dashboard:orders:total"                  // 总订单数  
+- "dashboard:orders:pending"                // 待处理订单数
+```
+
+**会话数据缓存**:
+- 用户会话状态
+- API 访问令牌
+- 临时计算结果
+
+**性能特性**:
+- **亚毫秒响应**: 内存存储，极速访问
+- **自动过期**: 基于时间的数据清理
+- **高并发**: 支持大量并发读写
+- **数据类型丰富**: String、Hash、List、Set 等
+
+### 数据存储策略对比
+
+| 数据类型 | 存储方案 | 访问模式 | 一致性要求 | 扩展性 |
+|----------|----------|----------|------------|--------|
+| **订单事务数据** | SQL Server | 读写均衡 | 强一致性 | 垂直扩展 |
+| **验证数据** | SQL Server | 读多写少 | 强一致性 | 读副本扩展 |
+| **产品目录** | Cosmos DB | 读多写少 | 最终一致性 | 水平扩展 |
+| **缓存数据** | Redis | 读写频繁 | 无一致性要求 | 集群扩展 |
+
+### 数据一致性策略
+
+#### 跨数据库一致性
+
+**1. 最终一致性模式**
+```
+SQL Server (主数据) → 异步同步 → Cosmos DB (副本数据)
+```
+
+**2. 缓存一致性模式**  
+```
+业务操作 → 更新 SQL → 失效 Redis → 懒加载重建
+```
+
+**3. 双写模式**
+```
+关键数据 → 同时写入 SQL + Cosmos → 异步校验一致性
+```
+
+#### 数据同步机制
+
+**事件驱动同步**:
+- Service Bus 事件触发数据同步
+- 失败重试和补偿机制
+- 数据变更审计和追踪
+
+**定时同步任务**:
+- 增量数据同步
+- 数据一致性校验
+- 孤立数据清理
 
 ## 消息架构设计
 

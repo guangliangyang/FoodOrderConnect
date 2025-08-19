@@ -45,8 +45,9 @@ This is a modern cloud-native architecture demonstration project showcasing an e
 |-----------|------------------|----------|
 | **External Order API** | .NET 8.0, ASP.NET Core | External order receipt and validation |
 | **Internal System API** | .NET 8.0, Entity Framework | Internal system integration and data management |
-| **Order Integration Function** | Azure Functions v4 | Order validation and data enrichment |
+| **Order Integration Function** | Azure Functions v4 | 🔄 **Order processing middleware: validation, enrichment, and orchestration** |
 | **Customer Communication Function** | Azure Functions v4, LangChain | 🤖 **AI-Powered Customer Communication** |
+| **BidOne.Shared** | .NET 8.0 Class Library | 📦 **Shared infrastructure: DDD, Events, Metrics** |
 | **Azure Logic Apps** | Logic Apps Standard | Enterprise workflow orchestration (optional) |
 | **Message Bus** | Azure Service Bus | Reliable asynchronous messaging |
 | **Event Grid** | Azure Event Grid | Real-time event-driven communication |
@@ -59,7 +60,10 @@ This project demonstrates **two parallel processing paths** for educational and 
 
 #### Path 1: Azure Functions Chain (Recommended for Development)
 ```
-order-received → OrderValidationFunction → order-validated → OrderEnrichmentFunction → order-processing → InternalSystemApi
+order-received → [OrderIntegrationFunction] → order-processing → InternalSystemApi
+                      ↓                    ↓
+              OrderValidationFunction → OrderEnrichmentFunction
+              (业务验证+错误检测)      (数据丰富化+供应商分配)
 ```
 
 #### Path 2: Logic Apps Workflow (Optional for Production)
@@ -75,6 +79,197 @@ order-received → Logic App → HTTP calls to Functions → InternalSystemApi �
 - **Local Development**: Use Functions path (simpler, faster debugging)
 - **Production**: Choose based on team preference and enterprise requirements
 - **Monitoring**: Both paths are fully monitored and traced
+
+### 🔄 OrderIntegrationFunction - The Processing Engine
+
+**OrderIntegrationFunction** serves as the **intelligent middleware** between order receipt and final processing, handling critical business logic:
+
+#### Core Components
+
+| Function | Trigger | Purpose | Output |
+|----------|---------|---------|--------|
+| **OrderValidationFunction** | `order-received` queue | Business rule validation + error detection | `order-validated` queue |
+| **OrderEnrichmentFunction** | `order-validated` queue | Data enrichment + supplier assignment | `order-processing` queue |
+| **DashboardMetricsProcessor** | Event Grid events | Real-time business metrics | Dashboard updates |
+
+#### Processing Pipeline
+```mermaid
+graph LR
+    A[External API] --> B[order-received]
+    B --> C[OrderValidationFunction<br/>📋 Validation]
+    C --> D[order-validated]
+    D --> E[OrderEnrichmentFunction<br/>🔍 Enrichment]
+    E --> F[order-processing]
+    F --> G[Internal API]
+    
+    C -.-> H[High-Value Errors]
+    H --> I[AI Communication]
+```
+
+#### Key Features
+- **🛡️ Multi-layer Validation**: Customer, product, pricing, and business rule validation
+- **📈 Data Enrichment**: Product details, pricing calculation, supplier assignment
+- **🚨 Intelligent Error Detection**: Automatic high-value error identification and AI-powered communication
+- **📊 Real-time Metrics**: Live dashboard updates via Event Grid triggers
+- **⚡ High Performance**: Serverless scaling and parallel processing
+- **🔄 Fault Tolerance**: Automatic retry, dead letter queues, and graceful degradation
+
+### 📦 Shared Infrastructure - The Foundation
+
+**BidOne.Shared** serves as the **foundational layer** that provides unified business models, domain-driven design infrastructure, and cross-cutting concerns for all services.
+
+#### Core Infrastructure Components
+
+| Component | Purpose | Key Features |
+|-----------|---------|--------------|
+| **Domain Layer** | DDD Infrastructure | AggregateRoot, Entity, ValueObjects, Domain Events |
+| **Business Models** | Unified Data Models | Order aggregates, validation results, DTOs |
+| **Event System** | Integration Events | Event-driven communication contracts |
+| **Metrics System** | Business Monitoring | Prometheus metrics collection |
+| **Service Abstractions** | Interface Contracts | Message publishing, event handling |
+
+#### Domain-Driven Design (DDD) Implementation
+
+```mermaid
+graph TB
+    subgraph "📦 BidOne.Shared"
+        subgraph "🏗️ Domain Layer"
+            AR[AggregateRoot<br/>聚合根基类]
+            EN[Entity<br/>实体基类]
+            VO[ValueObject<br/>值对象基类]
+            DE[DomainEvent<br/>领域事件]
+        end
+        
+        subgraph "💼 Business Models"
+            ORDER[Order<br/>订单聚合根]
+            ITEM[OrderItem<br/>订单项实体]
+            VOS[Value Objects<br/>OrderId, Money, etc.]
+        end
+        
+        subgraph "📡 Event System"
+            IE[IntegrationEvent<br/>集成事件基类]
+            EVENTS[具体事件<br/>OrderReceived, OrderConfirmed]
+        end
+        
+        subgraph "📊 Infrastructure"
+            METRICS[BusinessMetrics<br/>Prometheus指标]
+            SERVICES[Service Interfaces<br/>消息发布接口]
+        end
+    end
+    
+    AR --> ORDER
+    EN --> ITEM
+    VO --> VOS
+    DE --> IE
+    IE --> EVENTS
+```
+
+#### Key Design Patterns
+
+**1. Domain-Driven Design (DDD)**
+- **Aggregate Root**: Order manages business invariants and publishes domain events
+- **Value Objects**: Strong-typed identifiers (OrderId, CustomerId, Money)
+- **Domain Events**: Automatic event publishing for business state changes
+- **Rich Business Logic**: Methods like `Order.Validate()`, `Order.Confirm()`, `Order.Cancel()`
+
+**2. Event-Driven Architecture**
+- **Integration Events**: Cross-service communication contracts
+- **Event Publishing**: Unified `IMessagePublisher` interface
+- **Event Handling**: Standard event handler patterns
+
+**3. Monitoring & Observability**
+- **Business Metrics**: Prometheus counters, histograms, gauges
+- **Performance Tracking**: Request duration, processing time metrics
+- **Health Monitoring**: System status and component health indicators
+
+#### Order Aggregate Example
+```csharp
+// Rich domain model with business logic
+public class Order : AggregateRoot
+{
+    public void Validate()
+    {
+        if (Status != OrderStatus.Received)
+            throw new InvalidOperationException($"Cannot validate order in status {Status}");
+        
+        Status = OrderStatus.Validating;
+        AddDomainEvent(new OrderValidationStartedEvent(Id));  // Auto-publish domain event
+    }
+    
+    public void Confirm(string supplierId)
+    {
+        if (Status != OrderStatus.Processing)
+            throw new InvalidOperationException($"Cannot confirm order from status {Status}");
+        
+        SupplierId = supplierId;
+        Status = OrderStatus.Confirmed;
+        AddDomainEvent(new OrderConfirmedEvent(Id, SupplierId, TotalAmount));
+    }
+}
+```
+
+### 💾 Data Architecture
+
+The platform uses a **multi-database architecture** optimized for different data characteristics and access patterns:
+
+#### Database Systems Overview
+
+| Database | Type | Services | Purpose |
+|----------|------|----------|---------|
+| **SQL Server (BidOneDB)** | Relational | InternalSystemApi + OrderIntegrationFunction | Business data + validation |
+| **Azure Cosmos DB** | NoSQL Document | OrderIntegrationFunction | Product catalog + enrichment data |
+| **Redis Cache** | In-Memory | ExternalOrderApi | High-speed caching + sessions |
+
+#### Data Flow Architecture
+```mermaid
+graph TB
+    subgraph "🌐 API Layer"
+        EXT[ExternalOrderApi<br/>Order Receipt]
+        INT[InternalSystemApi<br/>Business Processing]
+    end
+    
+    subgraph "⚡ Processing Layer"  
+        FUNC[OrderIntegrationFunction<br/>Validation + Enrichment]
+    end
+    
+    subgraph "💾 Data Storage Layer"
+        SQL[(SQL Server BidOneDB<br/>📊 Transactional Data)]
+        COSMOS[(Cosmos DB<br/>📦 Product Catalog)]
+        REDIS[(Redis Cache<br/>⚡ High-Speed Cache)]
+    end
+    
+    EXT --> REDIS
+    EXT --> FUNC
+    FUNC --> SQL
+    FUNC --> COSMOS  
+    FUNC --> INT
+    INT --> SQL
+```
+
+#### Service-Database Mapping
+
+**InternalSystemApi → SQL Server**
+- **DbContext**: `BidOneDbContext`
+- **Connection**: `DefaultConnection`
+- **Tables**: Orders, Customers, Suppliers, Inventory, Audit logs
+- **Purpose**: ACID transactions, complex relationships, business logic
+
+**OrderIntegrationFunction → SQL Server**  
+- **DbContext**: `OrderValidationDbContext`
+- **Connection**: `SqlConnectionString`
+- **Tables**: Customer (validation), Product (validation)
+- **Purpose**: Fast validation queries, lightweight data models
+
+**OrderIntegrationFunction → Cosmos DB**
+- **DbContext**: `ProductEnrichmentDbContext`  
+- **Connection**: `CosmosDbConnectionString`
+- **Collections**: ProductEnrichmentData, CustomerEnrichmentData, SupplierData
+- **Purpose**: Global distribution, flexible schema, product enrichment
+
+**ExternalOrderApi → Redis**
+- **Connection**: `Redis`
+- **Data Types**: Order cache, business metrics, session data
+- **Purpose**: Sub-millisecond response, automatic expiration, high throughput
 
 ### 🧠 AI-Driven Architecture
 
@@ -368,6 +563,8 @@ dotnet test                     # Run tests
 | 🚀 [Deployment Guide](docs/deployment-guide.md) | Local and cloud deployment instructions | DevOps, Operations |
 | 🎯 [Demo Guide](docs/demo-guide.md) | Complete demo scripts and scenarios | Product Managers, Sales |
 | 🔄 [Processing Modes Guide](docs/processing-modes-guide.md) | How to choose between Functions and Logic Apps | Developers, Architects |
+| ⚙️ [OrderIntegrationFunction Guide](docs/order-integration-function.md) | Detailed middleware component documentation | Developers, System Architects |
+| 💾 [Database Architecture](docs/database-architecture.md) | Multi-database design and data modeling | Database Architects, Developers |
 | 🔧 [Troubleshooting](docs/troubleshooting.md) | Common problem solutions | Developers, Operations |
 
 ## 💡 Technical Highlights Showcase
