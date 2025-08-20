@@ -1766,6 +1766,375 @@ public class CircuitBreakerService
         {
             throw new CircuitBreakerOpenException();
         }
+
+## 11. 全栈可观测性架构分析
+
+项目实现了综合的监控和可观测性架构，集成了Serilog、Application Insights、Prometheus、Grafana、Jaeger、OpenTelemetry和Event Grid等工具，形成了一个完整的监控生态系统。
+
+### 11.1 可观测性架构总览
+
+```mermaid
+graph TB
+    subgraph "📱 应用层"
+        APP1[ExternalOrderApi<br/>Serilog + App Insights]
+        APP2[InternalSystemApi<br/>Serilog + App Insights]
+        APP3[OrderIntegrationFunction<br/>Azure Functions Logs]
+        APP4[CustomerCommunicationFunction<br/>Azure Functions Logs]
+    end
+    
+    subgraph "📊 指标收集层"
+        PROM[Prometheus<br/>业务指标收集]
+        OTEL[OpenTelemetry Collector<br/>数据聚合和路由]
+        APPINS[Application Insights<br/>应用性能监控]
+    end
+    
+    subgraph "🔍 分布式追踪层"
+        JAEGER[Jaeger<br/>分布式追踪]
+        TRACES[Request Tracing<br/>端到端请求跟踪]
+    end
+    
+    subgraph "📊 事件驱动层"
+        EG[Event Grid<br/>实时事件流]
+        DASHBOARD[Dashboard Events<br/>仪表盘实时更新]
+    end
+    
+    subgraph "📈 可视化层"
+        GRAFANA[Grafana<br/>业务仪表盘]
+        JAEGER_UI[Jaeger UI<br/>追踪分析]
+        AZURE_PORTAL[Azure Portal<br/>Application Insights]
+    end
+    
+    APP1 --> PROM
+    APP2 --> PROM
+    APP1 --> APPINS
+    APP2 --> APPINS
+    APP3 --> APPINS
+    APP4 --> APPINS
+    
+    APP1 --> OTEL
+    APP2 --> OTEL
+    OTEL --> JAEGER
+    OTEL --> PROM
+    
+    APP1 --> EG
+    APP2 --> EG
+    APP3 --> EG
+    EG --> DASHBOARD
+    
+    PROM --> GRAFANA
+    JAEGER --> JAEGER_UI
+    APPINS --> AZURE_PORTAL
+    DASHBOARD --> GRAFANA
+```
+
+### 11.2 分层监控策略详解
+
+#### 日志聚合层 (Serilog + Application Insights)
+
+**配置位置**: `src/ExternalOrderApi/Program.cs:15-24`, `src/InternalSystemApi/Program.cs:18-26`
+
+```csharp
+// Serilog 统一日志配置
+Log.Logger = new LoggerConfiguration()
+    .ReadFrom.Configuration(builder.Configuration)
+    .Enrich.FromLogContext()                    // 上下文信息丰富
+    .WriteTo.Console()                          // 本地开发控制台输出
+    .WriteTo.ApplicationInsights(               // 云端日志聚合
+        builder.Configuration.GetConnectionString("ApplicationInsights") ?? "", 
+        TelemetryConverter.Traces
+    )
+    .CreateLogger();
+```
+
+**功能特性**:
+- **统一日志格式**: 结构化日志记录，支持JSON序列化
+- **上下文信息**: 自动添加请求ID、用户信息等上下文
+- **多目标输出**: 同时输出到控制台和Application Insights
+- **分级日志**: 支持Info、Warning、Error等不同级别
+
+#### 业务指标收集层 (Prometheus + BidOne.Shared)
+
+**核心组件**: `src/Shared/Metrics/BusinessMetrics.cs:8-52`
+
+```csharp
+// 业务指标定义示例
+public static class BusinessMetrics
+{
+    // 订单处理数量计数器
+    public static readonly Counter OrdersProcessed = Metrics
+        .CreateCounter("bidone_orders_processed_total", "订单处理总数",
+            new[] { "status", "service" });
+    
+    // 订单处理时间直方图
+    public static readonly Histogram OrderProcessingTime = Metrics
+        .CreateHistogram("bidone_order_processing_seconds", "订单处理时间(秒)",
+            new HistogramConfiguration
+            {
+                Buckets = Histogram.LinearBuckets(0.01, 0.05, 20), // 0.01s 到 1s
+                LabelNames = new[] { "service", "operation" }
+            });
+    
+    // API请求响应时间
+    public static readonly Histogram ApiRequestDuration = Metrics
+        .CreateHistogram("bidone_api_request_duration_seconds", "API请求响应时间(秒)",
+            new HistogramConfiguration
+            {
+                Buckets = Histogram.ExponentialBuckets(0.001, 2, 15), // 1ms 到 16s
+                LabelNames = new[] { "method", "endpoint", "status" }
+            });
+}
+```
+
+**Prometheus数据源配置**: `config/prometheus.yml:14-43`
+
+```yaml
+# 业务指标收集配置
+scrape_configs:
+  # External Order API 业务指标 (端口9090)
+  - job_name: 'external-order-api-metrics'
+    static_configs:
+      - targets: ['external-order-api:9090']
+    metrics_path: '/metrics'
+    scrape_interval: 15s
+    
+  # Internal System API 业务指标 (端口9091)
+  - job_name: 'internal-system-api-metrics'
+    static_configs:
+      - targets: ['internal-system-api:9091']
+    metrics_path: '/metrics'
+    scrape_interval: 15s
+```
+
+#### 分布式追踪层 (OpenTelemetry + Jaeger)
+
+**OpenTelemetry Collector配置**: `config/otel-collector-config.yaml:1-53`
+
+```yaml
+# 数据接收器
+receivers:
+  otlp:                    # OpenTelemetry Protocol
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+# 数据处理器
+processors:
+  batch:
+    timeout: 1s            # 批量处理超时
+    send_batch_size: 1024  # 批处理大小
+  memory_limiter:
+    limit_mib: 512         # 内存限制
+
+# 数据导出器
+exporters:
+  otlp/jaeger:             # 导出到Jaeger
+    endpoint: jaeger:4317
+    tls:
+      insecure: true
+  prometheus:              # 导出到Prometheus
+    endpoint: "0.0.0.0:8889"
+
+# 数据管道
+service:
+  pipelines:
+    traces:                # 追踪数据管道
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [otlp/jaeger, debug]
+    metrics:               # 指标数据管道
+      receivers: [otlp, prometheus]
+      processors: [memory_limiter, batch]
+      exporters: [prometheus, debug]
+```
+
+#### 事件驱动监控层 (Event Grid + Dashboard)
+
+**Event Grid集成**: `src/Shared/Services/DashboardEventPublisher.cs:37-77`
+
+```csharp
+// 事件发布服务
+public async Task PublishOrderMetricsAsync(int totalOrders, int todayOrders, int pendingOrders, string status)
+{
+    var eventData = new
+    {
+        TotalOrdersCount = totalOrders,
+        TodayOrdersCount = todayOrders,
+        PendingOrdersCount = pendingOrders,
+        Status = status,
+        Timestamp = DateTime.UtcNow
+    };
+
+    var eventGridEvent = new EventGridEvent(
+        subject: "dashboard/metrics/orders",
+        eventType: "BidOne.Dashboard.OrderMetrics",   // 事件类型
+        dataVersion: "1.0",
+        data: eventData
+    );
+
+    await _eventGridClient.SendEventAsync(eventGridEvent, cancellationToken);
+}
+```
+
+**仪表盘指标处理**: `src/OrderIntegrationFunction/Functions/DashboardMetricsProcessor.cs:30-50`
+
+```csharp
+// Event Grid触发器处理仪表盘事件
+[Function("DashboardMetricsProcessor")]
+public async Task ProcessDashboardEvents([EventGridTrigger] EventGridEvent eventGridEvent)
+{
+    switch (eventGridEvent.EventType)
+    {
+        case "BidOne.Dashboard.OrderMetrics":      // 订单指标事件
+            await HandleOrderMetricsEvent(eventGridEvent);
+            break;
+        case "BidOne.Dashboard.PerformanceAlert":  // 性能告警事件
+            await HandlePerformanceAlertEvent(eventGridEvent);
+            break;
+        case "BidOne.Dashboard.SystemHealth":      // 系统健康事件
+            await HandleSystemHealthEvent(eventGridEvent);
+            break;
+    }
+}
+```
+
+#### 可视化仪表盘层 (Grafana + Jaeger UI)
+
+**Grafana数据源配置**: `config/grafana/datasources/datasources.yml:1-15`
+
+```yaml
+# Grafana数据源配置
+datasources:
+  - name: Prometheus         # 业务指标数据源
+    type: prometheus
+    url: http://prometheus:9090
+    isDefault: true
+    
+  - name: Jaeger            # 分布式追踪数据源
+    type: jaeger
+    url: http://jaeger:16686
+```
+
+### 11.3 监控数据流向分析
+
+```mermaid
+sequenceDiagram
+    participant API as API 服务
+    participant SERI as Serilog
+    participant PROM as Prometheus
+    participant OTEL as OpenTelemetry
+    participant EG as Event Grid
+    participant APPINS as App Insights
+    participant GRAF as Grafana
+    participant JAEG as Jaeger
+    
+    Note over API: 请求处理开始
+    
+    API->>SERI: 结构化日志记录
+    SERI->>APPINS: 日志数据传输
+    
+    API->>PROM: 业务指标更新
+    PROM->>GRAF: 指标数据查询
+    
+    API->>OTEL: 追踪数据发送
+    OTEL->>JAEG: 分布式追踪数据
+    
+    API->>EG: 业务事件发布
+    EG->>GRAF: 实时仪表盘更新
+    
+    Note over GRAF: 统一可视化仪表盘
+```
+
+### 11.4 监控类型和用途对比
+
+| 监控类型 | 工具 | 数据类型 | 主要用途 | 访问方式 |
+|---------|------|---------|----------|----------|
+| **日志聚合** | Serilog + App Insights | 结构化日志 | 错误诊断、调试分析 | Azure Portal |
+| **业务指标** | Prometheus + Grafana | 时间序列数据 | 性能监控、容量规划 | `http://localhost:3000` |
+| **分布式追踪** | OpenTelemetry + Jaeger | 请求追踪链 | 性能瓶颈、依赖分析 | `http://localhost:16686` |
+| **实时事件** | Event Grid + Functions | 业务事件流 | 实时告警、仪表盘更新 | WebHook/Function |
+| **应用性能** | Application Insights | APM数据 | 应用性能分析 | Azure Portal |
+
+### 11.5 开发和生产环境对比
+
+#### 开发环境配置
+
+```bash
+# 启动完整监控环境
+docker-compose up -d
+
+# 访问地址
+仪表盘: http://localhost:3000 (admin/admin123)
+指标收集: http://localhost:9090
+追踪分析: http://localhost:16686
+```
+
+#### 生产环境集成
+
+**Azure服务集成**:
+```bicep
+// Azure Application Insights
+resource appInsights 'Microsoft.Insights/components@2020-02-02' = {
+  name: 'bidone-appinsights'
+  properties: {
+    Application_Type: 'web'
+    WorkspaceResourceId: logAnalyticsWorkspace.id
+  }
+}
+
+// Azure Event Grid Topic
+resource eventGridTopic 'Microsoft.EventGrid/topics@2022-06-15' = {
+  name: 'bidone-dashboard-events'
+  properties: {
+    inputSchema: 'EventGridSchema'
+  }
+}
+```
+
+### 11.6 监控最佳实践总结
+
+#### 日志策略
+```csharp
+// 推荐的日志级别设置
+"Logging": {
+  "LogLevel": {
+    "Default": "Information",
+    "Microsoft.AspNetCore": "Warning",      // 减少框架噪音
+    "Microsoft.EntityFrameworkCore": "Information"
+  }
+}
+```
+
+#### 指标命名规范
+```csharp
+// 遵循Prometheus命名约定
+public static readonly Counter OrdersProcessed = Metrics
+    .CreateCounter(
+        "bidone_orders_processed_total",        // 应用前缀 + 业务指标 + _total后缀
+        "订单处理总数",                     // 中文描述
+        new[] { "status", "service" }           // 有意义的标签
+    );
+```
+
+#### 追踪相关性
+```csharp
+// 请求相关性追踪
+using (var activity = ActivitySource.StartActivity("订单处理"))
+{
+    activity?.SetTag("order.id", orderId);
+    activity?.SetTag("customer.id", customerId);
+    
+    // 业务逻辑处理
+}
+```
+
+**监控架构优势**:
+1. **全面覆盖**: 从日志、指标、追踪到事件的全方位监控
+2. **统一可视化**: Grafana集成多数据源，提供统一仪表盘
+3. **实时响应**: Event Grid实现实时事件驱动和告警
+4. **云原生集成**: 全面支持Azure监控服务集成
+5. **性能优化**: 异步处理和批量传输，最小化性能影响
         
         try
         {
