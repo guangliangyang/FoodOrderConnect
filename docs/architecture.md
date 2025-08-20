@@ -895,6 +895,1417 @@ public string ProductId
 public decimal TotalPrice => GetTotalPrice().Amount;
 ```
 
+## 6. 集成事件 (IntegrationEvents) 完整流程分析
+
+### 6.1 事件架构概览
+
+集成事件是整个平台**事件驱动架构**的核心，实现了服务间的松耦合通信。以下是完整的事件流转架构：
+
+```mermaid
+graph LR
+    subgraph "🌐 API层"
+        EXT[ExternalOrderApi<br/>订单接收]
+        INT[InternalSystemApi<br/>业务处理]
+    end
+    
+    subgraph "📨 事件传输层"
+        SB[(Service Bus<br/>消息队列)]
+        EG[(Event Grid<br/>事件通知)]
+    end
+    
+    subgraph "⚡ 处理层"
+        VAL[OrderValidationFunction<br/>订单验证]
+        ENR[OrderEnrichmentFunction<br/>数据丰富化]
+        AI[CustomerCommunicationFunction<br/>AI智能客服]
+    end
+    
+    EXT -->|OrderReceivedEvent| SB
+    SB -->|order-received| VAL
+    VAL -->|OrderValidatedEvent| SB
+    SB -->|order-validated| ENR
+    ENR -->|OrderEnrichedEvent| SB
+    SB -->|order-processing| INT
+    
+    VAL -.->|HighValueErrorEvent| SB
+    SB -.->|high-value-errors| AI
+    
+    AI --> EG
+    EG -.->|实时通知| EXT
+```
+
+### 6.2 事件生命周期详解
+
+#### 阶段1: 事件发布 (Event Publishing)
+
+**位置**: `src/ExternalOrderApi/Services/OrderService.cs:82`
+```csharp
+// 发布 OrderReceivedEvent 集成事件
+await _messagePublisher.PublishEventAsync(orderReceivedEvent, cancellationToken);
+```
+
+**技术实现**: `ServiceBusMessagePublisher.cs`
+```csharp
+public async Task PublishEventAsync<T>(T integrationEvent, CancellationToken cancellationToken = default) 
+    where T : IntegrationEvent
+{
+    var queueName = GetEventQueueName(typeof(T));  // 自动路由到对应队列
+    await PublishAsync(integrationEvent, queueName, cancellationToken);
+}
+```
+
+**关键特性**:
+- **自动队列路由**: 根据事件类型自动确定目标队列
+- **消息持久化**: Service Bus 确保消息不丢失
+- **批量支持**: 支持批量事件发布提高性能
+- **重试机制**: 内置指数退避重试策略
+
+#### 阶段2: 事件消费 (Event Consumption)
+
+**Service Bus Trigger 自动触发**:
+```csharp
+[Function("ValidateOrderFromServiceBus")]
+[ServiceBusOutput("order-validated", Connection = "ServiceBusConnection")]
+public async Task<string> ValidateOrderFromServiceBus(
+    [ServiceBusTrigger("order-received", Connection = "ServiceBusConnection")] string orderMessage)
+```
+
+**处理流程**:
+1. **自动反序列化**: JSON → 强类型对象
+2. **业务逻辑处理**: 订单验证、数据丰富化
+3. **条件事件发布**: 根据业务规则决定下游事件
+4. **输出绑定**: 自动发送结果到下游队列
+
+#### 阶段3: 高价值错误智能处理
+
+**错误检测逻辑** (`OrderValidationFunction.cs:152`):
+```csharp
+private static bool IsHighValueError(Order order, ValidationResult validationResult)
+{
+    // 高价值订单: 金额 > $1000
+    var orderValue = order.Items.Sum(i => i.TotalPrice);
+    var isHighValueOrder = orderValue > 1000m;
+    
+    // 关键错误类型
+    var criticalErrors = new[] { 
+        "CUSTOMER_NOT_FOUND", "PRODUCT_NOT_FOUND", 
+        "PRICE_MISMATCH", "ORDER_VALUE_EXCEEDED" 
+    };
+    var hasCriticalError = validationResult.Errors.Any(e => criticalErrors.Contains(e.Code));
+    
+    return isHighValueOrder || hasCriticalError;
+}
+```
+
+**AI处理流程** (`CustomerCommunicationFunction`):
+```csharp
+[ServiceBusTrigger("high-value-errors", Connection = "ServiceBusConnection")]
+public async Task ProcessHighValueErrorFromServiceBus(string errorMessage)
+{
+    var errorEvent = JsonSerializer.Deserialize<HighValueErrorEvent>(errorMessage);
+    await _communicationService.ProcessHighValueErrorAsync(errorEvent);
+}
+```
+
+### 6.3 事件类型与队列映射
+
+| 集成事件 | 队列名称 | 生产者 | 消费者 | 触发条件 | 业务意义 |
+|---------|---------|--------|--------|----------|----------|
+| `OrderReceivedEvent` | `order-received` | ExternalOrderApi | OrderValidationFunction | 订单提交成功 | 启动订单处理流程 |
+| `OrderValidatedEvent` | `order-validated` | OrderValidationFunction | OrderEnrichmentFunction | 验证通过 | 进入数据丰富化阶段 |
+| `OrderEnrichedEvent` | `order-enriched` | OrderEnrichmentFunction | InternalSystemApi | 丰富化完成 | 进入最终处理阶段 |
+| `HighValueErrorEvent` | `high-value-errors` | OrderValidationFunction | CustomerCommunicationFunction | 高价值错误 | 触发AI智能客服 |
+| `OrderConfirmedEvent` | `order-confirmed` | InternalSystemApi | - | 订单确认 | 通知外部系统 |
+| `OrderFailedEvent` | `order-failed` | InternalSystemApi | - | 处理失败 | 错误通知和补偿 |
+
+### 6.4 技术实现细节
+
+#### 消息发布机制
+
+**队列自动管理**:
+```csharp
+private async Task EnsureQueueExistsAsync(string queueName)
+{
+    // 开发环境: 使用预配置队列
+    if (IsEmulatorEnvironment())
+    {
+        _logger.LogDebug("Service Bus Emulator: Using pre-configured queue '{QueueName}'", queueName);
+        return;
+    }
+    
+    // 生产环境: 动态创建队列
+    if (!await _adminClient.QueueExistsAsync(queueName))
+    {
+        await _adminClient.CreateQueueAsync(queueName);
+        _logger.LogInformation("✅ Successfully created Service Bus queue: {QueueName}", queueName);
+    }
+}
+```
+
+**消息属性增强**:
+```csharp
+var serviceBusMessage = new ServiceBusMessage(messageBody)
+{
+    ContentType = "application/json",
+    MessageId = Guid.NewGuid().ToString(),
+    CorrelationId = ExtractCorrelationId(message),  // 端到端追踪
+    TimeToLive = TimeSpan.FromHours(24)             // 消息过期时间
+};
+
+// 自定义属性用于路由和过滤
+serviceBusMessage.ApplicationProperties.Add("MessageType", typeof(T).Name);
+serviceBusMessage.ApplicationProperties.Add("CreatedAt", DateTime.UtcNow);
+serviceBusMessage.ApplicationProperties.Add("Source", "ExternalOrderApi");
+```
+
+#### 错误处理和重试策略
+
+**死信队列 (Dead Letter Queue)**:
+- 消息处理失败自动进入死信队列
+- 支持人工审查和重新处理
+- 防止坏消息阻塞整个处理管道
+
+**指数退避重试**:
+```csharp
+// Azure Functions 自动重试配置
+{
+  "version": "2.0",
+  "extensions": {
+    "serviceBus": {
+      "messageHandlerOptions": {
+        "maxConcurrentCalls": 32,
+        "maxAutoRenewDuration": "00:05:00"
+      }
+    }
+  }
+}
+```
+
+### 6.5 AI智能处理流程深度解析
+
+#### 高价值错误事件结构
+
+```csharp
+public class HighValueErrorEvent : IntegrationEvent
+{
+    public string OrderId { get; set; } = string.Empty;
+    public string CustomerId { get; set; } = string.Empty;
+    public string CustomerEmail { get; set; } = string.Empty;
+    public string ErrorCategory { get; set; } = string.Empty;      // Customer/Product/Pricing/Delivery
+    public string ErrorMessage { get; set; } = string.Empty;
+    public decimal OrderValue { get; set; }
+    public string CustomerTier { get; set; } = string.Empty;       // Premium/Gold/Silver/Standard
+    public string ProcessingStage { get; set; } = string.Empty;    // Validation/Enrichment/Processing
+    public Dictionary<string, object> ContextData { get; set; } = new();
+}
+```
+
+#### LangChain + OpenAI 智能分析
+
+**错误根因分析**:
+```csharp
+public async Task<string> AnalyzeErrorAsync(HighValueErrorEvent errorEvent, CancellationToken cancellationToken = default)
+{
+    var prompt = $@"
+作为资深的客户服务专家，请分析以下订单错误:
+- 订单ID: {errorEvent.OrderId}
+- 客户等级: {errorEvent.CustomerTier}
+- 订单金额: ${errorEvent.OrderValue:N2}
+- 错误类别: {errorEvent.ErrorCategory}
+- 错误详情: {errorEvent.ErrorMessage}
+- 处理阶段: {errorEvent.ProcessingStage}
+
+请提供:
+1. 错误根本原因分析
+2. 对客户业务影响评估
+3. 建议的补救措施
+4. 预防类似问题的长期策略
+";
+
+    return await _openAIService.GenerateCompletionAsync(prompt, cancellationToken);
+}
+```
+
+**个性化客户消息生成**:
+```csharp
+public async Task<string> GenerateCustomerMessageAsync(HighValueErrorEvent errorEvent, string analysis, CancellationToken cancellationToken = default)
+{
+    var compensationLevel = errorEvent.CustomerTier switch
+    {
+        "Premium" => "20% 折扣 + 免费快递升级 + 专属客服支持",
+        "Gold" => "15% 折扣 + 免费快递",
+        "Silver" => "10% 折扣",
+        _ => "优惠券补偿"
+    };
+
+    var prompt = $@"
+作为专业的客户沟通专家，为以下客户生成个性化的道歉和补偿邮件:
+
+客户信息:
+- 等级: {errorEvent.CustomerTier}
+- 订单金额: ${errorEvent.OrderValue:N2}
+- 建议补偿: {compensationLevel}
+
+错误分析:
+{analysis}
+
+请生成正式但友好的邮件，包含:
+1. 真诚的道歉
+2. 问题解释 (非技术性语言)
+3. 具体的补偿方案
+4. 后续跟进承诺
+";
+
+    return await _openAIService.GenerateCompletionAsync(prompt, cancellationToken);
+}
+```
+
+#### 智能操作建议
+
+**为内部团队生成处理建议**:
+```csharp
+public async Task<List<string>> GenerateSuggestedActionsAsync(HighValueErrorEvent errorEvent, string analysis, CancellationToken cancellationToken = default)
+{
+    // AI 生成的智能建议示例:
+    return new List<string>
+    {
+        $"🔥 立即处理: 联系客户 {errorEvent.CustomerEmail} (VIP客户)",
+        $"💰 授权补偿: 订单金额 ${errorEvent.OrderValue:N2} 的15%折扣",
+        $"📞 升级处理: 安排高级客服专员跟进",
+        $"🔍 根因分析: 检查 {errorEvent.ErrorCategory} 相关业务流程",
+        $"📊 监控设置: 为类似错误设置实时监控告警",
+        $"🔄 流程优化: 在 {errorEvent.ProcessingStage} 阶段增加额外验证"
+    };
+}
+```
+
+### 6.6 监控与可观测性
+
+#### 业务指标收集
+
+```csharp
+// 订单处理成功率
+BusinessMetrics.OrdersProcessed
+    .WithLabels(order.Status.ToString(), "OrderValidationFunction")
+    .Inc();
+
+// 高价值错误率
+BusinessMetrics.OrdersProcessed
+    .WithLabels("HighValueError", errorEvent.ErrorCategory)
+    .Inc();
+
+// AI处理时间
+using (BusinessMetrics.OrderProcessingTime
+    .WithLabels("CustomerCommunication", "AIAnalysis")
+    .NewTimer())
+{
+    await _langChainService.AnalyzeErrorAsync(errorEvent);
+}
+```
+
+#### 端到端追踪
+
+**CorrelationId 传递**:
+```csharp
+// 事件发布时设置 CorrelationId
+var orderReceivedEvent = new OrderReceivedEvent
+{
+    OrderId = order.Id,
+    CorrelationId = correlationId,  // 贯穿整个处理流程
+    Source = "ExternalOrderApi"
+};
+
+// 所有后续事件继承相同的 CorrelationId
+var errorEvent = new HighValueErrorEvent
+{
+    CorrelationId = order.Metadata.GetValueOrDefault("CorrelationId", string.Empty).ToString(),
+    // ... 其他属性
+};
+```
+
+**结构化日志**:
+```csharp
+_logger.LogInformation("🚨 High-value error event published for order {OrderId}, " +
+                      "value ${OrderValue:N2}, customer {CustomerTier}, " +
+                      "correlation {CorrelationId}",
+    order.Id, errorEvent.OrderValue, errorEvent.CustomerTier, errorEvent.CorrelationId);
+```
+
+### 6.7 双处理路径架构设计
+
+#### 设计理念
+
+项目实现了**两条并行处理路径**，用于展示不同的 Azure 集成模式：
+
+```mermaid
+graph TB
+    subgraph "📨 共享事件源"
+        SB[Service Bus Queue<br/>order-received]
+    end
+    
+    subgraph "🚀 路径1: Azure Functions 链"
+        F1[OrderValidationFunction]
+        F2[OrderEnrichmentFunction]
+        F3[CustomerCommunicationFunction]
+    end
+    
+    subgraph "🔄 路径2: Logic Apps 工作流"
+        LA[Logic App]
+        HTTP[HTTP Connector]
+        TIMER[Timer Trigger]
+    end
+    
+    subgraph "🎯 最终处理"
+        API[InternalSystemApi]
+    end
+    
+    SB --> F1
+    F1 --> F2
+    F2 --> API
+    F1 -.-> F3
+    
+    SB --> LA
+    LA --> HTTP
+    HTTP --> API
+```
+
+#### 路径特性对比
+
+| 特性 | Functions 路径 | Logic Apps 路径 |
+|------|----------------|-----------------|
+| **触发方式** | Service Bus Trigger | HTTP Polling |
+| **开发体验** | 代码优先 | 可视化设计器 |
+| **性能** | 毫秒级启动 | 秒级启动 |
+| **扩缩容** | 自动扩缩容 | 手动配置 |
+| **监控** | Application Insights | Logic Apps 监控 |
+| **成本** | 按执行计费 | 按动作计费 |
+| **适用场景** | 高频、低延迟 | 复杂工作流 |
+
+#### 技术选型指导
+
+**选择 Functions 路径的场景**:
+- 高性能要求 (毫秒级响应)
+- 复杂业务逻辑
+- 需要细粒度控制
+- 开发团队熟悉代码开发
+
+**选择 Logic Apps 路径的场景**:
+- 复杂的工作流编排
+- 需要可视化设计
+- 集成多个 SaaS 服务
+- 业务人员参与设计
+
+### 6.8 生产环境最佳实践
+
+#### 消息处理优化
+
+**并发控制**:
+```csharp
+// host.json 配置
+{
+  "extensions": {
+    "serviceBus": {
+      "messageHandlerOptions": {
+        "maxConcurrentCalls": 32,        // 并发处理数量
+        "maxAutoRenewDuration": "00:05:00"  // 消息锁定时间
+      }
+    }
+  }
+}
+```
+
+**批量处理**:
+```csharp
+// 批量发布提高吞吐量
+await _messagePublisher.PublishBatchAsync(events, "order-events", cancellationToken);
+```
+
+#### 错误处理策略
+
+**优雅降级**:
+```csharp
+public async Task<string> AnalyzeErrorAsync(HighValueErrorEvent errorEvent, CancellationToken cancellationToken = default)
+{
+    try
+    {
+        // 优先使用 OpenAI API
+        return await CallOpenAIAsync(errorEvent, cancellationToken);
+    }
+    catch (Exception ex)
+    {
+        _logger.LogWarning(ex, "OpenAI API unavailable, falling back to intelligent simulation");
+        // 降级到智能模拟分析
+        return GenerateIntelligentAnalysis(errorEvent);
+    }
+}
+```
+
+**Circuit Breaker 模式**:
+```csharp
+// 防止级联故障
+public class CircuitBreakerService
+{
+    private int _failureCount = 0;
+    private DateTime _lastFailureTime = DateTime.MinValue;
+    private readonly int _threshold = 5;
+    private readonly TimeSpan _timeout = TimeSpan.FromMinutes(1);
+
+    public async Task<T> ExecuteAsync<T>(Func<Task<T>> operation)
+    {
+        if (_failureCount >= _threshold && 
+            DateTime.UtcNow - _lastFailureTime < _timeout)
+        {
+            throw new CircuitBreakerOpenException();
+        }
+        
+        try
+        {
+            var result = await operation();
+            _failureCount = 0;  // 重置计数器
+            return result;
+        }
+        catch
+        {
+            _failureCount++;
+            _lastFailureTime = DateTime.UtcNow;
+            throw;
+        }
+    }
+}
+```
+
+## 7. 项目开发详细指南
+
+### 7.1 ExternalOrderApi - 外部订单接收服务
+
+**技术栈**: ASP.NET Core 8.0 Web API + Service Bus + Redis + Prometheus
+
+#### 项目结构与职责
+
+```
+ExternalOrderApi/
+├── 📁 Controllers/           # API 控制器层
+│   └── OrdersController.cs   # 订单相关端点
+├── 📁 Services/             # 业务服务层
+│   ├── IOrderService.cs     # 订单服务接口
+│   ├── OrderService.cs      # 订单业务逻辑
+│   ├── ServiceBusMessagePublisher.cs  # Service Bus 消息发布
+│   └── ConsoleMessagePublisher.cs     # 开发环境控制台输出
+├── 📁 Validators/           # 请求验证器
+│   └── CreateOrderRequestValidator.cs # 订单创建验证
+├── Program.cs               # 应用启动和配置
+└── Dockerfile              # 容器化配置
+```
+
+#### 核心功能实现
+
+**1. 订单接收与验证**
+```csharp
+[HttpPost]
+[ProducesResponseType(typeof(OrderResponse), StatusCodes.Status202Accepted)]
+public async Task<ActionResult<OrderResponse>> CreateOrder(
+    [FromBody] CreateOrderRequest request,
+    CancellationToken cancellationToken = default)
+{
+    // 1. FluentValidation 自动验证请求
+    // 2. 业务逻辑处理
+    var response = await _orderService.CreateOrderAsync(request, cancellationToken);
+    
+    // 3. 返回 202 Accepted (异步处理)
+    return Accepted(response);
+}
+```
+
+**2. 事件驱动消息发布**
+```csharp
+public async Task<OrderResponse> CreateOrderAsync(CreateOrderRequest request, CancellationToken cancellationToken)
+{
+    // 创建订单聚合根
+    var order = Order.Create(OrderId.CreateNew(), CustomerId.Create(request.CustomerId));
+    
+    // 添加订单项
+    foreach (var item in request.Items)
+    {
+        order.AddItem(ProductInfo.Create(item.ProductId, item.ProductName), 
+                     Quantity.Create(item.Quantity), 
+                     Money.Create(item.UnitPrice));
+    }
+    
+    // 🚀 双路径架构: 同时发布到队列和事件
+    await _messagePublisher.PublishAsync(order, "order-received", cancellationToken);
+    await _messagePublisher.PublishEventAsync(orderReceivedEvent, cancellationToken);
+    
+    return new OrderResponse { OrderId = order.Id, Status = "Received" };
+}
+```
+
+**3. Service Bus 集成**
+```csharp
+public class ServiceBusMessagePublisher : IMessagePublisher
+{
+    // 自动队列管理
+    private async Task EnsureQueueExistsAsync(string queueName)
+    {
+        if (IsEmulatorEnvironment()) return; // 开发环境跳过
+        
+        if (!await _adminClient.QueueExistsAsync(queueName))
+        {
+            await _adminClient.CreateQueueAsync(queueName);
+        }
+    }
+    
+    // 消息发布增强
+    public async Task PublishAsync<T>(T message, string queueName, CancellationToken cancellationToken)
+    {
+        var serviceBusMessage = new ServiceBusMessage(JsonSerializer.Serialize(message))
+        {
+            ContentType = "application/json",
+            CorrelationId = ExtractCorrelationId(message),  // 端到端追踪
+            TimeToLive = TimeSpan.FromHours(24)
+        };
+        
+        await sender.SendMessageAsync(serviceBusMessage, cancellationToken);
+    }
+}
+```
+
+#### 技术特性
+
+**依赖注入配置**:
+```csharp
+// Program.cs 关键配置
+builder.Services.AddControllers()
+    .AddFluentValidation(fv => fv.RegisterValidatorsFromAssemblyContaining<CreateOrderRequestValidator>());
+
+// Service Bus 环境适配
+if (!string.IsNullOrEmpty(serviceBusConnectionString))
+{
+    builder.Services.AddSingleton<ServiceBusClient>(provider =>
+        new ServiceBusClient(serviceBusConnectionString));
+    builder.Services.AddScoped<IMessagePublisher, ServiceBusMessagePublisher>();
+}
+else
+{
+    builder.Services.AddScoped<IMessagePublisher, ConsoleMessagePublisher>(); // 开发模式
+}
+
+// Redis 缓存 (可选)
+builder.Services.AddStackExchangeRedisCache(options =>
+{
+    options.Configuration = redisConnectionString;
+});
+
+// Prometheus 监控
+builder.Services.AddSingleton<MetricServer>();
+```
+
+**健康检查**:
+```csharp
+builder.Services.AddHealthChecks()
+    .AddAzureServiceBusQueue(serviceBusConnectionString, "order-received")
+    .AddRedis(redisConnectionString);
+```
+
+### 7.2 InternalSystemApi - 内部业务处理服务
+
+**技术栈**: ASP.NET Core 8.0 + Entity Framework Core + SQL Server + AutoMapper
+
+#### 项目结构与特点
+
+```
+InternalSystemApi/
+├── 📁 Controllers/              # API 控制器
+│   ├── OrdersController.cs      # 订单处理端点
+│   └── InventoryController.cs   # 库存管理端点
+├── 📁 Data/                     # 数据访问层
+│   ├── BidOneDbContext.cs       # EF Core 上下文
+│   └── 📁 Entities/             # 数据库实体
+│       ├── OrderEntity.cs       # 订单实体
+│       ├── CustomerEntity.cs    # 客户实体
+│       ├── ProductEntity.cs     # 产品实体
+│       └── InventoryEntity.cs   # 库存实体
+├── 📁 Services/                 # 业务服务层
+│   ├── OrderProcessingService.cs   # 订单处理核心逻辑
+│   ├── InventoryService.cs         # 库存管理服务
+│   └── SupplierNotificationService.cs # 供应商通知
+├── 📁 Mappings/                 # AutoMapper 配置
+│   └── MappingProfile.cs        # 实体-模型映射
+└── 📁 Migrations/               # EF Core 迁移文件
+```
+
+#### 核心业务逻辑
+
+**1. 订单处理工作流**
+```csharp
+public class OrderProcessingService : IOrderProcessingService
+{
+    public async Task<OrderResponse> ProcessOrderAsync(Order order, CancellationToken cancellationToken)
+    {
+        using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
+        
+        try
+        {
+            // 1. 转换聚合根到实体
+            var orderEntity = _mapper.Map<OrderEntity>(order);
+            
+            // 2. 库存验证和预留
+            var inventoryResult = await _inventoryService.ReserveInventoryAsync(
+                order.Items.ToList(), cancellationToken);
+            
+            if (!inventoryResult.IsSuccessful)
+            {
+                await PublishHighValueProcessingError(orderEntity, "Inventory", 
+                    "Insufficient inventory", cancellationToken);
+                throw new InvalidOperationException("Inventory reservation failed");
+            }
+            
+            // 3. 供应商分配
+            var supplierAssignment = await AssignSupplierAsync(orderEntity, cancellationToken);
+            if (supplierAssignment.IsSuccessful)
+            {
+                orderEntity.SupplierId = supplierAssignment.SupplierId;
+                orderEntity.Status = OrderStatus.Confirmed;
+            }
+            
+            // 4. 数据库持久化
+            await _dbContext.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            
+            // 5. 发布成功事件
+            await PublishOrderConfirmedEvent(orderEntity, cancellationToken);
+            
+            return _mapper.Map<OrderResponse>(orderEntity);
+        }
+        catch (Exception)
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            throw;
+        }
+    }
+}
+```
+
+**2. 高价值错误处理**
+```csharp
+private async Task PublishHighValueProcessingError(OrderEntity orderEntity, 
+    string category, string errorMessage, CancellationToken cancellationToken)
+{
+    var errorEvent = new HighValueErrorEvent
+    {
+        OrderId = orderEntity.Id,
+        CustomerId = orderEntity.CustomerId,
+        CustomerEmail = orderEntity.CustomerEmail ?? "unknown@example.com",
+        ErrorCategory = category,
+        ErrorMessage = errorMessage,
+        OrderValue = orderEntity.TotalAmount,
+        CustomerTier = DetermineCustomerTier(orderEntity.TotalAmount),
+        ProcessingStage = "Processing",
+        Source = "InternalSystemApi"
+    };
+    
+    await _messagePublisher.PublishAsync(errorEvent, "high-value-errors", cancellationToken);
+}
+```
+
+**3. Entity Framework 配置**
+```csharp
+public class BidOneDbContext : DbContext
+{
+    public DbSet<OrderEntity> Orders { get; set; }
+    public DbSet<CustomerEntity> Customers { get; set; }
+    public DbSet<ProductEntity> Products { get; set; }
+    public DbSet<InventoryEntity> Inventory { get; set; }
+    
+    // 自动审计日志
+    public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+    {
+        await AddAuditLogs();
+        return await base.SaveChangesAsync(cancellationToken);
+    }
+    
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        // 实体配置
+        modelBuilder.Entity<OrderEntity>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.TotalAmount).HasColumnType("decimal(18,2)");
+            entity.HasMany(e => e.Items).WithOne().HasForeignKey("OrderId");
+        });
+        
+        // 种子数据
+        modelBuilder.Entity<CustomerEntity>().HasData(
+            new CustomerEntity { Id = "customer-001", Name = "Test Customer", Email = "test@example.com" }
+        );
+    }
+}
+```
+
+#### 技术特性
+
+**AutoMapper 配置**:
+```csharp
+public class MappingProfile : Profile
+{
+    public MappingProfile()
+    {
+        // 聚合根 -> 实体映射
+        CreateMap<Order, OrderEntity>()
+            .ForMember(dest => dest.Id, opt => opt.MapFrom(src => src.Id.Value))
+            .ForMember(dest => dest.CustomerId, opt => opt.MapFrom(src => src.CustomerId.Value))
+            .ForMember(dest => dest.TotalAmount, opt => opt.MapFrom(src => src.GetTotalAmount().Amount));
+            
+        // 实体 -> 响应模型映射
+        CreateMap<OrderEntity, OrderResponse>();
+    }
+}
+```
+
+### 7.3 OrderIntegrationFunction - 订单集成处理引擎
+
+**技术栈**: Azure Functions v4 + .NET 8.0 + Service Bus + SQL Server + Cosmos DB
+
+#### 项目结构与架构
+
+```
+OrderIntegrationFunction/
+├── 📁 Functions/                    # Azure Functions 入口点
+│   ├── OrderValidationFunction.cs   # 订单验证处理
+│   ├── OrderEnrichmentFunction.cs   # 数据丰富化处理
+│   └── DashboardMetricsProcessor.cs # 实时指标处理
+├── 📁 Services/                     # 业务服务层
+│   ├── OrderValidationService.cs    # 验证逻辑实现
+│   ├── OrderEnrichmentService.cs    # 丰富化逻辑实现
+│   └── ExternalDataService.cs       # 外部数据源集成
+├── 📁 Data/                         # 数据访问层
+│   ├── OrderValidationDbContext.cs  # SQL Server 验证上下文
+│   └── ProductEnrichmentDbContext.cs # Cosmos DB 丰富化上下文
+└── host.json                        # Functions 运行时配置
+```
+
+#### 核心处理函数
+
+**1. 订单验证函数**
+```csharp
+[Function("ValidateOrderFromServiceBus")]
+[ServiceBusOutput("order-validated", Connection = "ServiceBusConnection")]
+public async Task<string> ValidateOrderFromServiceBus(
+    [ServiceBusTrigger("order-received", Connection = "ServiceBusConnection")] string orderMessage)
+{
+    var order = JsonSerializer.Deserialize<Order>(orderMessage);
+    
+    // 多层验证逻辑
+    var validationResult = await _validationService.ValidateOrderAsync(order);
+    
+    // 🚨 高价值错误智能检测
+    if (!validationResult.IsValid && IsHighValueError(order, validationResult))
+    {
+        await PublishHighValueErrorEvent(order, validationResult);
+    }
+    
+    // 创建验证响应
+    var response = new OrderValidationResponse
+    {
+        Order = order,
+        ValidationResult = validationResult,
+        ProcessedAt = DateTime.UtcNow
+    };
+    
+    return JsonSerializer.Serialize(response);
+}
+```
+
+**2. 数据丰富化函数**
+```csharp
+[Function("EnrichOrderFromServiceBus")]
+[ServiceBusOutput("order-processing", Connection = "ServiceBusConnection")]
+public async Task<string> EnrichOrderFromServiceBus(
+    [ServiceBusTrigger("order-validated", Connection = "ServiceBusConnection")] string validatedOrderMessage)
+{
+    var validationResponse = JsonSerializer.Deserialize<OrderValidationResponse>(validatedOrderMessage);
+    
+    if (!validationResponse.ValidationResult.IsValid)
+    {
+        throw new InvalidOperationException("Cannot enrich invalid order");
+    }
+    
+    // Cosmos DB 产品数据丰富化
+    var enrichmentResult = await _enrichmentService.EnrichOrderDataAsync(
+        validationResponse.Order, CancellationToken.None);
+    
+    var enrichedResponse = new OrderEnrichmentResponse
+    {
+        Order = validationResponse.Order,
+        EnrichmentData = enrichmentResult.EnrichmentData,
+        ProcessedAt = DateTime.UtcNow
+    };
+    
+    return JsonSerializer.Serialize(enrichedResponse);
+}
+```
+
+**3. 实时指标处理**
+```csharp
+[Function("ProcessDashboardMetrics")]
+public async Task ProcessDashboardMetrics(
+    [EventGridTrigger] EventGridEvent eventGridEvent)
+{
+    if (eventGridEvent.EventType == "Microsoft.ServiceBus.ActiveMessagesAvailableWithNoListeners")
+    {
+        var eventData = JsonSerializer.Deserialize<ServiceBusEventData>(eventGridEvent.Data.GetRawText());
+        
+        // 更新 Prometheus 指标
+        BusinessMetrics.PendingOrders
+            .WithLabels("OrderValidation")
+            .Set(eventData?.MessageCount ?? 0);
+            
+        // 发布到实时仪表板
+        await _dashboardEventPublisher.PublishEventAsync("metrics/queue-depth", 
+            "orders", new { QueueDepth = eventData?.MessageCount }, CancellationToken.None);
+    }
+}
+```
+
+#### 多数据库架构实现
+
+**SQL Server 验证上下文**:
+```csharp
+public class OrderValidationDbContext : DbContext
+{
+    public DbSet<CustomerEntity> Customers { get; set; }
+    public DbSet<ProductEntity> Products { get; set; }
+    
+    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+    {
+        optionsBuilder.UseSqlServer(_connectionString);
+    }
+}
+```
+
+**Cosmos DB 丰富化上下文**:
+```csharp
+public class ProductEnrichmentDbContext : DbContext
+{
+    public DbSet<ProductEnrichmentData> ProductEnrichmentData { get; set; }
+    public DbSet<CustomerEnrichmentData> CustomerEnrichmentData { get; set; }
+    
+    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+    {
+        optionsBuilder.UseCosmos(_connectionString, _databaseName);
+    }
+}
+```
+
+#### 高价值错误智能检测
+
+```csharp
+private static bool IsHighValueError(Order order, ValidationResult validationResult)
+{
+    // 高价值订单判断: 金额 > $1000
+    var orderValue = order.Items.Sum(i => i.TotalPrice);
+    var isHighValueOrder = orderValue > 1000m;
+    
+    // 关键错误类型识别
+    var criticalErrors = new[] { 
+        "CUSTOMER_NOT_FOUND", "PRODUCT_NOT_FOUND", 
+        "PRICE_MISMATCH", "ORDER_VALUE_EXCEEDED" 
+    };
+    var hasCriticalError = validationResult.Errors.Any(e => criticalErrors.Contains(e.Code));
+    
+    return isHighValueOrder || hasCriticalError;
+}
+
+private async Task PublishHighValueErrorEvent(Order order, ValidationResult validationResult)
+{
+    var errorEvent = new HighValueErrorEvent
+    {
+        OrderId = order.Id,
+        CustomerId = order.CustomerId,
+        CustomerEmail = order.CustomerEmail ?? "unknown@example.com",
+        ErrorCategory = GetErrorCategory(validationResult.Errors),
+        TechnicalDetails = JsonSerializer.Serialize(validationResult.Errors),
+        OrderValue = order.Items.Sum(i => i.TotalPrice),
+        CustomerTier = GetCustomerTier(order),
+        ProcessingStage = "Validation",
+        ContextData = new Dictionary<string, object>
+        {
+            ["OrderItemCount"] = order.Items.Count,
+            ["ValidationErrorCount"] = validationResult.Errors.Count
+        }
+    };
+    
+    await _messagePublisher.PublishAsync(errorEvent, "high-value-errors", CancellationToken.None);
+}
+```
+
+### 7.4 CustomerCommunicationFunction - AI智能客服系统
+
+**技术栈**: Azure Functions v4 + LangChain + OpenAI + Service Bus + Event Grid
+
+#### 项目结构与AI集成
+
+```
+CustomerCommunicationFunction/
+├── 📁 Functions/                        # Azure Functions 入口
+│   └── CustomerCommunicationProcessor.cs # 事件处理入口
+├── 📁 Services/                         # AI服务层
+│   ├── ICustomerCommunicationService.cs # 客户沟通接口
+│   ├── CustomerCommunicationService.cs  # 业务编排服务
+│   ├── ILangChainService.cs             # AI分析接口
+│   ├── LangChainService.cs              # LangChain + OpenAI 实现
+│   └── NotificationService.cs           # 通知发送服务
+└── host.json                            # Functions 配置
+```
+
+#### AI处理核心流程
+
+**1. 高价值错误处理编排**
+```csharp
+[Function("ProcessHighValueErrorFromServiceBus")]
+public async Task ProcessHighValueErrorFromServiceBus(
+    [ServiceBusTrigger("high-value-errors", Connection = "ServiceBusConnection")] string errorMessage)
+{
+    var errorEvent = JsonSerializer.Deserialize<HighValueErrorEvent>(errorMessage);
+    
+    await _communicationService.ProcessHighValueErrorAsync(errorEvent);
+}
+
+public async Task ProcessHighValueErrorAsync(HighValueErrorEvent errorEvent, CancellationToken cancellationToken = default)
+{
+    var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+    
+    try
+    {
+        // 1. AI 错误分析
+        var analysis = await _langChainService.AnalyzeErrorAsync(errorEvent, cancellationToken);
+        
+        // 2. 个性化客户消息生成
+        var customerMessage = await _langChainService.GenerateCustomerMessageAsync(
+            errorEvent, analysis, cancellationToken);
+        
+        // 3. 智能操作建议生成
+        var suggestedActions = await _langChainService.GenerateSuggestedActionsAsync(
+            errorEvent, analysis, cancellationToken);
+        
+        // 4. 发送客户通知
+        await _notificationService.SendCustomerNotificationAsync(
+            errorEvent.CustomerEmail, customerMessage, cancellationToken);
+        
+        // 5. 发送内部团队通知
+        await _notificationService.SendInternalNotificationAsync(
+            suggestedActions, errorEvent, cancellationToken);
+        
+        LogProcessingMetrics(errorEvent, true, stopwatch.Elapsed);
+    }
+    catch (Exception ex)
+    {
+        _logger.LogError(ex, "Failed to process high-value error for order {OrderId}", errorEvent.OrderId);
+        LogProcessingMetrics(errorEvent, false, stopwatch.Elapsed);
+        throw;
+    }
+}
+```
+
+**2. LangChain + OpenAI 智能分析**
+```csharp
+public class LangChainService : ILangChainService
+{
+    private readonly IChatModel _chatModel;
+    private readonly ILogger<LangChainService> _logger;
+    
+    public async Task<string> AnalyzeErrorAsync(HighValueErrorEvent errorEvent, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var prompt = $@"
+作为资深的客户服务专家，请分析以下订单错误:
+
+📋 订单信息:
+- 订单ID: {errorEvent.OrderId}
+- 客户等级: {errorEvent.CustomerTier}
+- 订单金额: ${errorEvent.OrderValue:N2}
+- 错误类别: {errorEvent.ErrorCategory}
+- 错误详情: {errorEvent.ErrorMessage}
+- 处理阶段: {errorEvent.ProcessingStage}
+
+🎯 分析要求:
+1. 错误根本原因分析
+2. 对客户业务影响评估 (高/中/低)
+3. 建议的补救措施 (具体、可执行)
+4. 预防类似问题的长期策略
+
+请用专业但易懂的语言回答，避免技术术语。";
+
+            var result = await _chatModel.GenerateAsync(prompt, cancellationToken: cancellationToken);
+            return result.Messages.LastOrDefault()?.Content ?? "分析暂时不可用";
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "OpenAI API unavailable, using intelligent fallback");
+            return GenerateIntelligentAnalysis(errorEvent);
+        }
+    }
+    
+    public async Task<string> GenerateCustomerMessageAsync(HighValueErrorEvent errorEvent, string analysis, CancellationToken cancellationToken = default)
+    {
+        var compensationLevel = errorEvent.CustomerTier switch
+        {
+            "Premium" => "20% 折扣 + 免费快递升级 + 专属客服支持",
+            "Gold" => "15% 折扣 + 免费快递",
+            "Silver" => "10% 折扣",
+            _ => "优惠券补偿"
+        };
+
+        var prompt = $@"
+作为专业的客户沟通专家，为以下客户生成个性化的道歉和补偿邮件:
+
+👤 客户信息:
+- 等级: {errorEvent.CustomerTier}
+- 订单金额: ${errorEvent.OrderValue:N2}
+- 建议补偿: {compensationLevel}
+
+🔍 错误分析:
+{analysis}
+
+✉️ 邮件要求:
+- 语调: 正式但友好、真诚
+- 结构: 道歉 → 解释 → 补偿 → 承诺
+- 长度: 150-200字
+- 避免: 技术术语、推卸责任
+
+请生成完整的邮件内容，包含主题行。";
+
+        try
+        {
+            var result = await _chatModel.GenerateAsync(prompt, cancellationToken: cancellationToken);
+            return result.Messages.LastOrDefault()?.Content ?? GenerateIntelligentCustomerMessage(errorEvent, analysis);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "OpenAI API unavailable, using intelligent template");
+            return GenerateIntelligentCustomerMessage(errorEvent, analysis);
+        }
+    }
+}
+```
+
+**3. 智能降级机制**
+```csharp
+private static string GenerateIntelligentAnalysis(HighValueErrorEvent errorEvent)
+{
+    var impactLevel = errorEvent.OrderValue switch
+    {
+        > 5000m => "高影响",
+        > 2000m => "中影响", 
+        _ => "低影响"
+    };
+    
+    var urgencyLevel = errorEvent.CustomerTier switch
+    {
+        "Premium" => "最高优先级",
+        "Gold" => "高优先级",
+        _ => "标准优先级"
+    };
+
+    return $@"
+🔍 智能分析结果:
+
+📊 影响评估: {impactLevel}
+- 订单价值: ${errorEvent.OrderValue:N2} ({errorEvent.CustomerTier} 客户)
+- 紧急程度: {urgencyLevel}
+
+⚠️ 错误分析:
+- 类别: {errorEvent.ErrorCategory}
+- 阶段: {errorEvent.ProcessingStage}
+- 建议: 立即人工干预，提供{errorEvent.CustomerTier}级别补偿
+
+🎯 推荐行动:
+1. 15分钟内联系客户
+2. 提供订单金额15%的补偿
+3. 升级到高级客服专员处理
+4. 后续48小时内跟进确认
+
+注：此为AI智能分析（OpenAI暂时不可用时的备用方案）";
+}
+```
+
+#### Event Grid 实时通知集成
+
+```csharp
+[Function("CustomerCommunicationProcessor")]
+public async Task ProcessEventGridNotification(
+    [EventGridTrigger] EventGridEvent eventGridEvent)
+{
+    if (eventGridEvent.EventType == "Microsoft.ServiceBus.ActiveMessagesAvailableWithNoListeners")
+    {
+        var eventData = JsonSerializer.Deserialize<ServiceBusEventData>(eventGridEvent.Data.GetRawText());
+        
+        // 实时仪表板更新
+        _logger.LogInformation("📊 Service Bus event: Queue={QueueName}, MessageCount={MessageCount}",
+            eventData?.EntityName, eventData?.MessageCount);
+            
+        // 可以添加额外的实时通知逻辑
+        // 例如：Teams通知、Slack警报、实时仪表板更新等
+    }
+}
+```
+
+### 7.5 BidOne.Shared - 共享基础设施项目
+
+**技术栈**: .NET 8.0 Class Library + Prometheus + Azure Service Bus + Event Grid
+
+#### 项目结构与设计原则
+
+```
+Shared/
+├── 📁 Domain/                    # DDD 领域层基础设施
+│   ├── AggregateRoot.cs          # 聚合根基类
+│   ├── Entity.cs                 # 实体基类
+│   ├── ValueObject.cs            # 值对象基类
+│   ├── IDomainEvent.cs           # 领域事件接口
+│   ├── DomainEvent.cs            # 领域事件基类
+│   ├── 📁 Events/                # 具体领域事件
+│   │   └── OrderDomainEvents.cs  # 订单相关领域事件
+│   └── 📁 ValueObjects/          # 强类型值对象
+│       ├── OrderId.cs            # 订单ID
+│       ├── CustomerId.cs         # 客户ID
+│       ├── Money.cs              # 货币金额
+│       ├── ProductInfo.cs        # 产品信息
+│       └── Quantity.cs           # 数量
+├── 📁 Events/                    # 集成事件
+│   └── IntegrationEvent.cs       # 所有集成事件定义
+├── 📁 Models/                    # 业务模型
+│   ├── Order.cs                  # 订单聚合根
+│   └── ValidationResult.cs       # 验证结果模型
+├── 📁 Services/                  # 服务抽象
+│   ├── IMessagePublisher.cs      # 消息发布接口
+│   ├── IEventPublisher.cs        # 事件发布接口
+│   └── IDashboardEventPublisher.cs # 仪表板事件接口
+└── 📁 Metrics/                   # 监控指标
+    └── BusinessMetrics.cs         # Prometheus 业务指标
+```
+
+#### DDD 基础设施实现
+
+**聚合根基类**:
+```csharp
+public abstract class AggregateRoot : Entity
+{
+    private readonly List<IDomainEvent> _domainEvents = new();
+    
+    [NotMapped]
+    public IReadOnlyCollection<IDomainEvent> DomainEvents => _domainEvents.AsReadOnly();
+    
+    protected void AddDomainEvent(IDomainEvent domainEvent)
+    {
+        _domainEvents.Add(domainEvent);
+    }
+    
+    public void MarkEventsAsCommitted()
+    {
+        _domainEvents.Clear();
+    }
+    
+    public void ClearDomainEvents()
+    {
+        _domainEvents.Clear();
+    }
+}
+```
+
+**强类型值对象示例**:
+```csharp
+public class OrderId : ValueObject
+{
+    public string Value { get; }
+    
+    private OrderId(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            throw new ArgumentException("OrderId cannot be null or empty", nameof(value));
+        Value = value;
+    }
+    
+    public static OrderId Create(string value) => new(value);
+    
+    public static OrderId CreateNew()
+    {
+        return new OrderId($"ORD-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString("N")[..8].ToUpper()}");
+    }
+    
+    // 隐式转换支持
+    public static implicit operator string(OrderId orderId) => orderId.Value;
+    public static implicit operator OrderId(string value) => Create(value);
+    
+    protected override IEnumerable<object> GetEqualityComponents()
+    {
+        yield return Value;
+    }
+}
+```
+
+#### 业务监控指标
+
+```csharp
+public static class BusinessMetrics
+{
+    /// <summary>
+    /// 订单处理总数计数器
+    /// </summary>
+    public static readonly Counter OrdersProcessed = Prometheus.Metrics
+        .CreateCounter("bidone_orders_processed_total", "订单处理总数",
+            new[] { "status", "service" });
+
+    /// <summary>
+    /// 订单处理时间直方图
+    /// </summary>
+    public static readonly Histogram OrderProcessingTime = Prometheus.Metrics
+        .CreateHistogram("bidone_order_processing_seconds", "订单处理时间(秒)",
+            new HistogramConfiguration
+            {
+                Buckets = Histogram.LinearBuckets(0.01, 0.05, 20), // 10ms 到 1s
+                LabelNames = new[] { "service", "operation" }
+            });
+
+    /// <summary>
+    /// 当前待处理订单数量计量器
+    /// </summary>
+    public static readonly Gauge PendingOrders = Prometheus.Metrics
+        .CreateGauge("bidone_pending_orders_count", "当前待处理订单数量",
+            new[] { "service" });
+
+    /// <summary>
+    /// API 请求响应时间直方图
+    /// </summary>
+    public static readonly Histogram ApiRequestDuration = Prometheus.Metrics
+        .CreateHistogram("bidone_api_request_duration_seconds", "API请求响应时间(秒)",
+            new HistogramConfiguration
+            {
+                Buckets = Histogram.ExponentialBuckets(0.001, 2, 15), // 1ms 到 16s
+                LabelNames = new[] { "method", "endpoint", "status" }
+            });
+}
+```
+
+#### 集成事件体系
+
+```csharp
+// 基础集成事件
+public abstract class IntegrationEvent
+{
+    public string Id { get; } = Guid.NewGuid().ToString();
+    public DateTime CreatedAt { get; } = DateTime.UtcNow;
+    public string EventType { get; protected set; } = string.Empty;
+    public string Source { get; set; } = string.Empty;
+    public string CorrelationId { get; set; } = string.Empty;
+    public Dictionary<string, object> Metadata { get; set; } = new();
+}
+
+// 具体业务事件
+public class HighValueErrorEvent : IntegrationEvent
+{
+    public HighValueErrorEvent()
+    {
+        EventType = nameof(HighValueErrorEvent);
+    }
+
+    public string OrderId { get; set; } = string.Empty;
+    public string CustomerId { get; set; } = string.Empty;
+    public string CustomerEmail { get; set; } = string.Empty;
+    public string ErrorCategory { get; set; } = string.Empty;      // Customer/Product/Pricing/Delivery
+    public decimal OrderValue { get; set; }
+    public string CustomerTier { get; set; } = string.Empty;       // Premium/Gold/Silver/Standard
+    public string ProcessingStage { get; set; } = string.Empty;    // Validation/Enrichment/Processing
+    public Dictionary<string, object> ContextData { get; set; } = new();
+}
+```
+
+### 7.6 开发环境配置与最佳实践
+
+#### 本地开发环境设置
+
+**1. 必需工具**:
+- .NET 8.0 SDK
+- Docker Desktop
+- Azure Functions Core Tools v4
+- SQL Server (LocalDB 或 Docker)
+- Azure Storage Emulator 或 Azurite
+
+**2. 配置管理**:
+```json
+// appsettings.Development.json 统一配置模式
+{
+  "ConnectionStrings": {
+    "DefaultConnection": "Server=(localdb)\\mssqllocaldb;Database=BidOneDB;Trusted_Connection=true;",
+    "ServiceBus": "Endpoint=sb://localhost:5672;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=...",
+    "Redis": "localhost:6379",
+    "CosmosDb": "AccountEndpoint=https://localhost:8081/;AccountKey=..."
+  },
+  "Serilog": {
+    "MinimumLevel": "Debug",
+    "WriteTo": [
+      { "Name": "Console" },
+      { "Name": "ApplicationInsights" }
+    ]
+  }
+}
+```
+
+**3. Docker 开发环境**:
+```bash
+# 启动完整开发环境
+./docker-dev.sh start
+
+# 仅启动基础设施 (推荐开发模式)
+./docker-dev.sh infra
+
+# 本地运行 APIs 和 Functions
+dotnet run --project src/ExternalOrderApi
+dotnet run --project src/InternalSystemApi
+cd src/OrderIntegrationFunction && func start
+cd src/CustomerCommunicationFunction && func start --port 7072
+```
+
+#### 调试与测试策略
+
+**1. 集成测试**:
+```csharp
+[TestClass]
+public class OrderProcessingIntegrationTests
+{
+    [TestMethod]
+    public async Task CompleteOrderFlow_ShouldProcessSuccessfully()
+    {
+        // 1. 发送订单到 ExternalOrderApi
+        var orderRequest = new CreateOrderRequest { /* ... */ };
+        var response = await _httpClient.PostAsJsonAsync("/api/orders", orderRequest);
+        
+        // 2. 验证 Service Bus 消息
+        await VerifyServiceBusMessage("order-received");
+        
+        // 3. 等待 Functions 处理
+        await WaitForProcessingCompletion();
+        
+        // 4. 验证最终状态
+        var orderStatus = await GetOrderStatus(response.OrderId);
+        Assert.AreEqual("Confirmed", orderStatus.Status);
+    }
+}
+```
+
+**2. 性能测试**:
+```csharp
+// 使用 NBomber 进行负载测试
+var scenario = Scenario.Create("order_creation", async context =>
+{
+    var order = GenerateRandomOrder();
+    var response = await httpClient.PostAsJsonAsync("/api/orders", order);
+    return response.IsSuccessStatusCode ? Response.Ok() : Response.Fail();
+})
+.WithLoadSimulations(
+    Simulation.InjectPerSec(rate: 100, during: TimeSpan.FromMinutes(5))
+);
+```
+
 ## 💾 数据架构设计
 
 ### 多数据库架构概览

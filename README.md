@@ -114,6 +114,71 @@ graph LR
 - **⚡ High Performance**: Serverless scaling and parallel processing
 - **🔄 Fault Tolerance**: Automatic retry, dead letter queues, and graceful degradation
 
+#### 🔄 Integration Events Processing Flow
+
+**OrderIntegrationFunction** is the core of the **event-driven architecture**, orchestrating the complete order processing workflow through Service Bus messaging:
+
+```mermaid
+graph TB
+    subgraph "📨 Event Flow"
+        E1[OrderReceivedEvent<br/>order-received queue]
+        E2[OrderValidatedEvent<br/>order-validated queue]
+        E3[OrderEnrichedEvent<br/>order-processing queue]
+        E4[HighValueErrorEvent<br/>high-value-errors queue]
+    end
+    
+    subgraph "⚡ Function Processing"
+        F1[OrderValidationFunction<br/>Validation Logic]
+        F2[OrderEnrichmentFunction<br/>Data Enrichment]
+        F3[CustomerCommunicationFunction<br/>AI Processing]
+    end
+    
+    E1 --> F1
+    F1 --> E2
+    E2 --> F2
+    F2 --> E3
+    F1 -.-> E4
+    E4 --> F3
+```
+
+**Event Processing Logic**:
+1. **OrderReceivedEvent** → Triggers validation with business rules
+2. **High-Value Error Detection** → Orders >$1000 or critical errors trigger AI communication
+3. **OrderValidatedEvent** → Successful validation proceeds to enrichment
+4. **OrderEnrichedEvent** → Complete order ready for final processing
+
+**Technical Implementation**:
+```csharp
+// Service Bus Trigger automatically processes events
+[ServiceBusTrigger("order-received", Connection = "ServiceBusConnection")]
+public async Task<string> ValidateOrderFromServiceBus(string orderMessage)
+{
+    var order = JsonSerializer.Deserialize<Order>(orderMessage);
+    var validationResult = await _validationService.ValidateOrderAsync(order);
+    
+    // High-value error detection and AI communication
+    if (!validationResult.IsValid && IsHighValueError(order, validationResult))
+    {
+        await PublishHighValueErrorEvent(order, validationResult);
+    }
+    
+    return CreateValidationResponse(order, validationResult);
+}
+```
+
+**AI Communication Trigger**:
+```csharp
+// CustomerCommunicationFunction processes high-value errors
+[ServiceBusTrigger("high-value-errors", Connection = "ServiceBusConnection")]
+public async Task ProcessHighValueErrorFromServiceBus(string errorMessage)
+{
+    var errorEvent = JsonSerializer.Deserialize<HighValueErrorEvent>(errorMessage);
+    
+    // LangChain + OpenAI analysis and customer communication
+    await _communicationService.ProcessHighValueErrorAsync(errorEvent);
+}
+```
+
 ### 📦 Shared Infrastructure - The Foundation
 
 **BidOne.Shared** serves as the **foundational layer** that provides unified business models, domain-driven design infrastructure, and cross-cutting concerns for all services.
