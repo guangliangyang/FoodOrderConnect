@@ -30,7 +30,7 @@ public class InternalApiClient : IInternalApiClient
         _httpClient = httpClient;
         _configuration = configuration;
         _logger = logger;
-        
+
         _baseUrl = configuration["InternalApi:BaseUrl"] ?? "http://internal-system-api";
         _jsonOptions = new JsonSerializerOptions
         {
@@ -76,7 +76,7 @@ public class InternalApiClient : IInternalApiClient
 
             // Handle different HTTP error codes
             var errorContent = await response.Content.ReadAsStringAsync(cancellationToken);
-            _logger.LogError("Internal System API returned error {StatusCode}: {ErrorContent}", 
+            _logger.LogError("Internal System API returned error {StatusCode}: {ErrorContent}",
                 response.StatusCode, errorContent);
 
             throw response.StatusCode switch
@@ -175,7 +175,7 @@ public class InternalApiClient : IInternalApiClient
             // In a real implementation, this would get a JWT token from Azure AD or a token service
             // For development, we'll use a simple JWT token generation or configuration
             var jwtToken = await GetJwtTokenAsync();
-            
+
             if (!string.IsNullOrEmpty(jwtToken))
             {
                 _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", jwtToken);

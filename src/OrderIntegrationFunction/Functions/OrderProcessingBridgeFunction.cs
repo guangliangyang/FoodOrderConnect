@@ -41,7 +41,7 @@ public class OrderProcessingBridgeFunction
         [ServiceBusTrigger("order-processing", Connection = "ServiceBusConnection")] string orderMessage)
     {
         var correlationId = Guid.NewGuid().ToString();
-        
+
         _logger.LogInformation("🔗 Order processing bridge triggered. CorrelationId: {CorrelationId}", correlationId);
 
         try
@@ -59,7 +59,7 @@ public class OrderProcessingBridgeFunction
             }
 
             var orderId = processingRequest.Order.Id;
-            _logger.LogInformation("Processing order {OrderId} via Internal System API bridge. CorrelationId: {CorrelationId}", 
+            _logger.LogInformation("Processing order {OrderId} via Internal System API bridge. CorrelationId: {CorrelationId}",
                 orderId, correlationId);
 
             // 📊 Start monitoring order processing time
@@ -69,7 +69,7 @@ public class OrderProcessingBridgeFunction
             var isApiHealthy = await _internalApiClient.IsHealthyAsync();
             if (!isApiHealthy)
             {
-                _logger.LogWarning("Internal System API health check failed for order {OrderId}. CorrelationId: {CorrelationId}", 
+                _logger.LogWarning("Internal System API health check failed for order {OrderId}. CorrelationId: {CorrelationId}",
                     orderId, correlationId);
                 // Don't throw - let the retry mechanism handle this
             }
@@ -101,50 +101,50 @@ public class OrderProcessingBridgeFunction
         {
             // Bad request - don't retry
             _logger.LogError(ex, "Invalid order data in processing request. This message will be moved to dead letter queue. CorrelationId: {CorrelationId}", correlationId);
-            
+
             // 📊 Record validation failure
             BusinessMetrics.OrdersProcessed.WithLabels("failed_validation", "OrderProcessingBridge").Inc();
-            
+
             throw; // This will move the message to dead letter queue
         }
         catch (UnauthorizedAccessException ex)
         {
             // Authentication issue - could be transient
             _logger.LogError(ex, "Authentication failed for Internal System API. This message will be retried. CorrelationId: {CorrelationId}", correlationId);
-            
+
             // 📊 Record auth failure
             BusinessMetrics.OrdersProcessed.WithLabels("failed_auth", "OrderProcessingBridge").Inc();
-            
+
             throw; // This will trigger retry
         }
         catch (TimeoutException ex)
         {
             // Timeout - likely transient, should retry
             _logger.LogError(ex, "Timeout calling Internal System API. This message will be retried. CorrelationId: {CorrelationId}", correlationId);
-            
+
             // 📊 Record timeout failure
             BusinessMetrics.OrdersProcessed.WithLabels("failed_timeout", "OrderProcessingBridge").Inc();
-            
+
             throw; // This will trigger retry
         }
         catch (HttpRequestException ex)
         {
             // HTTP error - could be transient
             _logger.LogError(ex, "HTTP error calling Internal System API. This message will be retried. CorrelationId: {CorrelationId}", correlationId);
-            
+
             // 📊 Record HTTP failure
             BusinessMetrics.OrdersProcessed.WithLabels("failed_http", "OrderProcessingBridge").Inc();
-            
+
             throw; // This will trigger retry
         }
         catch (Exception ex)
         {
             // Unexpected error
             _logger.LogError(ex, "Unexpected error processing order via Internal System API bridge. CorrelationId: {CorrelationId}", correlationId);
-            
+
             // 📊 Record general failure
             BusinessMetrics.OrdersProcessed.WithLabels("failed_unexpected", "OrderProcessingBridge").Inc();
-            
+
             throw; // This will trigger retry, then eventually dead letter
         }
     }
@@ -177,13 +177,13 @@ public class OrderProcessingBridgeFunction
             // Publish to a completion event queue for monitoring and potential downstream processing
             await _messagePublisher.PublishEventAsync(processedEvent);
 
-            _logger.LogInformation("Order processed event published for order {OrderId}. CorrelationId: {CorrelationId}", 
+            _logger.LogInformation("Order processed event published for order {OrderId}. CorrelationId: {CorrelationId}",
                 order.Id, correlationId);
         }
         catch (Exception ex)
         {
             // Don't fail the main operation if event publishing fails
-            _logger.LogWarning(ex, "Failed to publish order processed event for order {OrderId}. CorrelationId: {CorrelationId}", 
+            _logger.LogWarning(ex, "Failed to publish order processed event for order {OrderId}. CorrelationId: {CorrelationId}",
                 order.Id, correlationId);
         }
     }

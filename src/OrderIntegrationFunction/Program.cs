@@ -60,7 +60,7 @@ var host = new HostBuilder()
 
         // Add HTTP clients
         services.AddHttpClient<IExternalDataService, ExternalDataService>();
-        
+
         // Add Internal API client with retry policies
         services.AddHttpClient<IInternalApiClient, InternalApiClient>()
             .AddInternalApiRetryPolicy();
