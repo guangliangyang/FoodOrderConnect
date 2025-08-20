@@ -575,8 +575,9 @@ dotnet test                     # Run tests
 
 ### 🔒 Enterprise-Grade Reliability
 - **Message Persistence**: Service Bus ensures zero message loss
-- **Automatic Retry**: Exponential backoff retry mechanism
-- **Dead Letter Processing**: Intelligent routing of exception messages
+- **Multi-Layer Retry**: Exponential backoff at API Gateway (2s→4s→6s), Database (200ms→400ms→800ms), and Service Bus (0.8s→1.6s→3.2s)
+- **Circuit Breaker**: API Management circuit breaker (5 failures → 60s cooldown)
+- **Dead Letter Processing**: Intelligent routing of exception messages with Event Grid retry policies
 - **Transaction Consistency**: Distributed transactions ensure data integrity
 - **Fault Isolation**: Isolation between microservices faults
 

@@ -1339,9 +1339,419 @@ public async Task<string> AnalyzeErrorAsync(HighValueErrorEvent errorEvent, Canc
 }
 ```
 
-**Circuit Breaker 模式**:
+#### 指数退避重试机制详解
+
+系统在多个层面实现了完整的指数退避重试策略，确保高可用性和容错能力：
+
+**1. API Management 指数退避重试** (主要配置)
+
+**位置**: `infra/policies/external-api-policy.xml:74-76`
+```xml
+<!-- 指数退避重试策略 -->
+<retry condition="@(context.Response.StatusCode >= 500)" 
+       count="3" 
+       interval="2" 
+       max-interval="10" 
+       delta="2">
+    <forward-request buffer-request-body="true" />
+</retry>
+```
+
+**参数说明**:
+- `count="3"` - 最大重试次数: 3次
+- `interval="2"` - 初始重试间隔: 2秒  
+- `max-interval="10"` - 最大重试间隔: 10秒
+- `delta="2"` - 指数退避增量: 每次重试间隔增加2秒
+
+**重试时间序列**:
+- 初次请求失败 → 立即返回错误
+- 第1次重试: 2秒后执行
+- 第2次重试: 4秒后执行 (2 + 2)  
+- 第3次重试: 6秒后执行 (4 + 2)
+- 最终失败: 总计用时约12秒
+
+**2. Entity Framework Core 数据库重试**
+
+**位置**: `src/InternalSystemApi/Program.cs:81`
 ```csharp
-// 防止级联故障
+// SQL Server 连接重试配置
+options.UseSqlServer(connectionString, sqlOptions =>
+{
+    sqlOptions.EnableRetryOnFailure(
+        maxRetryCount: 3,                    // 最大重试次数
+        maxRetryDelay: TimeSpan.FromSeconds(10),  // 最大延迟时间
+        errorNumbersToAdd: null              // 额外的错误代码
+    );
+    sqlOptions.CommandTimeout(30);          // 命令超时30秒
+});
+```
+
+**EF Core 内置退避策略**:
+- 使用指数退避算法: `Math.Min(maxRetryDelay, TimeSpan.FromMilliseconds(Math.Pow(2, attemptCount) * 100))`
+- 第1次重试: ~200ms
+- 第2次重试: ~400ms  
+- 第3次重试: ~800ms
+- 包含随机抖动避免雷群效应
+
+**3. Azure Functions 重试配置**
+
+**Event Grid 重试** (`src/CustomerCommunicationFunction/host.json:27-31`):
+```json
+{
+  "extensions": {
+    "eventGrid": {
+      "maxEventsPerBatch": 1,
+      "preferredBatchSizeInKilobytes": 64,
+      "maxDeliveryRetryAttempts": 3        // 最大重试次数
+    }
+  }
+}
+```
+
+**Service Bus 消息处理** (`src/CustomerCommunicationFunction/host.json:13-19`):
+```json
+{
+  "extensions": {
+    "serviceBus": {
+      "prefetchCount": 100,
+      "messageHandlerOptions": {
+        "autoComplete": false,
+        "maxConcurrentCalls": 32,           // 最大并发处理数
+        "maxAutoRenewDuration": "00:30:00"  // 消息锁定续期时间
+      }
+    }
+  }
+}
+```
+
+**4. Event Grid 基础设施重试**
+
+**位置**: `infra/main.bicep:581-584`
+```bicep
+// Event Grid 订阅重试策略
+resource eventGridSubscription 'Microsoft.EventGrid/eventSubscriptions@2022-06-15' = {
+  properties: {
+    retryPolicy: {
+      maxDeliveryAttempts: 3              // 最大投递重试次数
+      eventTimeToLiveInMinutes: 60        // 事件存活时间60分钟
+    }
+    deadLetterDestination: {              // 死信队列配置
+      endpointType: 'StorageBlob'
+      properties: {
+        resourceId: storageAccount.id
+        blobContainerName: 'event-deadletter'
+      }
+    }
+  }
+}
+```
+
+**5. Cosmos DB 客户端重试**
+
+**位置**: 数据访问层配置示例
+```csharp
+// Cosmos DB 客户端重试策略
+var cosmosClientOptions = new CosmosClientOptions
+{
+    ConsistencyLevel = ConsistencyLevel.Session,
+    MaxRetryAttemptsOnRateLimitedRequests = 3,        // 限流重试次数
+    MaxRetryWaitTimeOnRateLimitedRequests = TimeSpan.FromSeconds(30),  // 最大等待时间
+    
+    // 请求超时配置
+    RequestTimeout = TimeSpan.FromSeconds(60),
+    OpenTcpConnectionTimeout = TimeSpan.FromSeconds(10),
+    
+    // 启用自动备份
+    EnableContentResponseOnWrite = false,  // 减少网络流量
+    AllowBulkExecution = true             // 启用批量执行优化
+};
+```
+
+**Cosmos DB 内置重试策略**:
+- 429 (请求速率过大): 自动指数退避
+- 503 (服务不可用): 立即重试
+- 网络错误: 指数退避重试
+
+**6. Service Bus 内置重试机制**
+
+Azure Service Bus SDK 具有内置的指数退避重试：
+
+```csharp
+// Service Bus 客户端自动重试配置
+var serviceBusClientOptions = new ServiceBusClientOptions
+{
+    RetryOptions = new ServiceBusRetryOptions
+    {
+        Mode = ServiceBusRetryMode.Exponential,    // 指数退避模式
+        MaxRetries = 3,                            // 最大重试次数
+        Delay = TimeSpan.FromSeconds(0.8),         // 基础延迟
+        MaxDelay = TimeSpan.FromSeconds(60),       // 最大延迟
+        TryTimeout = TimeSpan.FromSeconds(120)     // 单次操作超时
+    }
+};
+```
+
+**Service Bus 重试时间序列**:
+- 第1次重试: ~0.8秒
+- 第2次重试: ~1.6秒  
+- 第3次重试: ~3.2秒
+- 包含±20%随机抖动
+
+**7. Circuit Breaker + 重试组合模式**
+
+**位置**: `infra/policies/external-api-policy.xml:58-70`
+```xml
+<!-- Circuit Breaker 实现 -->
+<cache-lookup-value key="external-api-circuit-breaker" variable-name="circuitBreakerState" />
+<choose>
+    <when condition="@(context.Variables.GetValueOrDefault("circuitBreakerState", "closed") == "open")">
+        <return-response>
+            <set-status code="503" reason="Service Temporarily Unavailable" />
+            <set-header name="Retry-After" exists-action="override">
+                <value>60</value>  <!-- 熔断器打开后建议60秒后重试 -->
+            </set-header>
+            <set-body>{"error": {"code": "ServiceUnavailable", "message": "Service is temporarily unavailable. Please try again later."}}</set-body>
+        </return-response>
+    </when>
+</choose>
+```
+
+**Circuit Breaker 状态管理** (`infra/policies/external-api-policy.xml:82-101`):
+```xml
+<!-- 错误计数和熔断器状态管理 -->
+<choose>
+    <when condition="@(context.Response.StatusCode >= 500)">
+        <!-- 累计失败次数 -->
+        <cache-lookup-value key="external-api-failures" variable-name="failureCount" />
+        <set-variable name="newFailureCount" value="@(int.Parse(context.Variables.GetValueOrDefault("failureCount", "0").ToString()) + 1)" />
+        <cache-store-value key="external-api-failures" value="@(context.Variables["newFailureCount"])" duration="300" />
+        
+        <!-- 失败次数达到阈值时打开熔断器 -->
+        <choose>
+            <when condition="@(int.Parse(context.Variables["newFailureCount"].ToString()) >= 5)">
+                <cache-store-value key="external-api-circuit-breaker" value="open" duration="60" />
+            </when>
+        </choose>
+    </when>
+    <otherwise>
+        <!-- 成功时重置计数器 -->
+        <cache-remove-value key="external-api-failures" />
+        <cache-remove-value key="external-api-circuit-breaker" />
+    </otherwise>
+</choose>
+```
+
+**8. 多层重试策略总览**
+
+```mermaid
+graph TB
+    subgraph "📱 客户端层"
+        CLIENT[客户端应用]
+        CLIENT_RETRY[客户端重试逻辑<br/>自定义实现]
+    end
+    
+    subgraph "🌐 API网关层"
+        APIM[API Management<br/>3次指数退避重试<br/>2s → 4s → 6s]
+        CB[Circuit Breaker<br/>5次失败打开60s]
+    end
+    
+    subgraph "⚡ 应用服务层"
+        API[Order APIs<br/>应用层重试]
+        FUNC[Azure Functions<br/>Platform重试机制]
+    end
+    
+    subgraph "💾 数据层"
+        SQL[SQL Server<br/>EF Core 3次重试<br/>200ms → 400ms → 800ms]
+        COSMOS[Cosmos DB<br/>3次限流重试<br/>最大30s等待]
+        SB[Service Bus<br/>3次指数退避重试<br/>0.8s → 1.6s → 3.2s]
+    end
+    
+    CLIENT --> CLIENT_RETRY
+    CLIENT_RETRY --> APIM
+    APIM --> CB
+    CB --> API
+    API --> FUNC
+    FUNC --> SQL
+    FUNC --> COSMOS
+    API --> SB
+    
+    APIM -.-> |失败5次| CB
+    CB -.-> |60s后| APIM
+```
+
+**9. 重试机制最佳实践建议**
+
+**配置原则**:
+```csharp
+// 推荐的重试配置模板
+public static class RetryPolicyConfig
+{
+    // API Gateway 层: 快速重试
+    public static readonly RetryConfig ApiGateway = new()
+    {
+        MaxAttempts = 3,
+        BaseDelay = TimeSpan.FromSeconds(2),
+        MaxDelay = TimeSpan.FromSeconds(10),
+        Multiplier = 1.5,
+        Jitter = true  // 添加随机抖动
+    };
+    
+    // 数据库层: 中等重试间隔
+    public static readonly RetryConfig Database = new()
+    {
+        MaxAttempts = 3,
+        BaseDelay = TimeSpan.FromMilliseconds(200),
+        MaxDelay = TimeSpan.FromSeconds(10),
+        Multiplier = 2.0,
+        Jitter = true
+    };
+    
+    // 外部服务层: 较长重试间隔
+    public static readonly RetryConfig ExternalService = new()
+    {
+        MaxAttempts = 5,
+        BaseDelay = TimeSpan.FromSeconds(1),
+        MaxDelay = TimeSpan.FromSeconds(60),
+        Multiplier = 2.0,
+        Jitter = true
+    };
+}
+```
+
+**监控指标**:
+```csharp
+// 重试成功率监控
+BusinessMetrics.RetryAttempts
+    .WithLabels("external-api", "success")
+    .Inc();
+
+// 重试失败率监控  
+BusinessMetrics.RetryAttempts
+    .WithLabels("external-api", "exhausted")
+    .Inc();
+
+// 平均重试次数
+BusinessMetrics.AverageRetryCount
+    .WithLabels("database", "sql-server")
+    .Observe(retryCount);
+```
+
+### 10. Circuit Breaker 实现分析
+
+#### 10.1 实际使用的 Circuit Breaker 实现
+
+**⚠️ 重要说明**: 项目中的Circuit Breaker有两种实现方式：
+
+1. **实际生产使用**: API Management基础设施实现 (XML策略)
+2. **理论参考示例**: 应用层C#代码实现 (仅作为最佳实践展示)
+
+**项目中并未真正使用CircuitBreakerService类**，该类仅作为文档中的理论示例，展示如何在应用层实现Circuit Breaker模式。真正的Circuit Breaker功能由API Management的XML策略提供。
+
+#### 实际实现架构
+
+```mermaid
+graph LR
+    subgraph "📱 客户端层"
+        CLIENT[客户端应用]
+    end
+    
+    subgraph "🌐 API网关层 (实际Circuit Breaker实现)"
+        APIM[API Management<br/>XML策略Circuit Breaker]
+        CACHE[APIM Cache<br/>circuit-breaker状态]
+    end
+    
+    subgraph "⚡ 应用服务层"
+        EXT[ExternalOrderApi]
+        INT[InternalSystemApi]
+    end
+    
+    CLIENT --> APIM
+    APIM --> EXT
+    APIM --> INT
+    APIM -.-> CACHE
+    
+    APIM -.-> |失败5次| CACHE
+    CACHE -.-> |60s后重置| APIM
+```
+
+#### 真正的Circuit Breaker配置
+
+**1. API Management XML策略实现** (`infra/policies/external-api-policy.xml:58-70`)
+```xml
+<!-- 实际使用的Circuit Breaker实现 -->
+<cache-lookup-value key="external-api-circuit-breaker" variable-name="circuitBreakerState" />
+<choose>
+    <when condition="@(context.Variables.GetValueOrDefault("circuitBreakerState", "closed") == "open")">
+        <return-response>
+            <set-status code="503" reason="Service Temporarily Unavailable" />
+            <set-header name="Retry-After" exists-action="override">
+                <value>60</value>  <!-- 60秒后建议重试 -->
+            </set-header>
+            <set-body>{"error": {"code": "ServiceUnavailable", "message": "Service is temporarily unavailable. Please try again later."}}</set-body>
+        </return-response>
+    </when>
+</choose>
+```
+
+**2. 失败计数和状态管理** (`infra/policies/external-api-policy.xml:82-101`)
+```xml
+<!-- Circuit Breaker状态自动管理 -->
+<choose>
+    <when condition="@(context.Response.StatusCode >= 500)">
+        <!-- 累计失败次数 -->
+        <cache-lookup-value key="external-api-failures" variable-name="failureCount" />
+        <set-variable name="newFailureCount" value="@(int.Parse(context.Variables.GetValueOrDefault("failureCount", "0").ToString()) + 1)" />
+        <cache-store-value key="external-api-failures" value="@(context.Variables["newFailureCount"])" duration="300" />
+        
+        <!-- 失败5次时打开熔断器 -->
+        <choose>
+            <when condition="@(int.Parse(context.Variables["newFailureCount"].ToString()) >= 5)">
+                <cache-store-value key="external-api-circuit-breaker" value="open" duration="60" />
+            </when>
+        </choose>
+    </when>
+    <otherwise>
+        <!-- 成功时重置所有计数器 -->
+        <cache-remove-value key="external-api-failures" />
+        <cache-remove-value key="external-api-circuit-breaker" />
+    </otherwise>
+</choose>
+```
+
+**3. Bicep基础设施配置** (`infra/apim-config.bicep:36-51`)
+```bicep
+// API Management原生Circuit Breaker配置
+circuitBreaker: {
+  rules: [
+    {
+      conditions: {
+        errorTypes: [
+          'backend'      // 后端服务错误
+          'timeout'      // 超时错误
+        ]
+      }
+      name: 'external-api-circuit-breaker'
+      tripDuration: 'PT60S'    // 熔断器打开60秒
+    }
+  ]
+}
+```
+
+#### 实际Circuit Breaker工作流程
+
+1. **正常状态** (Closed): 所有请求正常转发到后端服务
+2. **错误累积**: API Management统计HTTP 5xx错误次数
+3. **熔断触发**: 连续5次失败后自动打开熔断器
+4. **熔断状态** (Open): 60秒内直接返回503，不调用后端
+5. **自动恢复**: 60秒后自动尝试半开状态
+6. **状态重置**: 成功请求后重置为关闭状态
+
+#### 10.2 应用层Circuit Breaker模式 (可选实现)
+
+**⚠️ 以下代码为推荐的应用层实现方式，当前项目中未实际使用**:
+
+```csharp
+// 可选的应用层Circuit Breaker实现 (仅为最佳实践示例)
 public class CircuitBreakerService
 {
     private int _failureCount = 0;
@@ -1372,6 +1782,79 @@ public class CircuitBreakerService
     }
 }
 ```
+
+#### 10.3 两种实现方式对比
+
+| 特性 | API Management Circuit Breaker | 应用层 Circuit Breaker |
+|------|--------------------------------|------------------------|
+| **实现位置** | 基础设施层 (网关) | 应用代码层 |
+| **配置方式** | XML策略 + Bicep | C# 代码 |
+| **性能影响** | 无应用性能影响 | 轻微内存和CPU开销 |
+| **故障隔离** | 完全隔离后端服务 | 服务内部隔离 |
+| **监控可见性** | API Management监控 | 应用日志和指标 |
+| **配置灵活性** | 策略驱动，可动态更新 | 代码驱动，需重新部署 |
+| **适用场景** | 外部服务调用保护 | 内部组件调用保护 |
+| **当前项目状态** | ✅ **正在使用** | ❌ **未实现** |
+
+#### 10.4 Circuit Breaker监控
+
+**API Management Circuit Breaker监控指标**:
+```bash
+# 熔断器状态监控
+az monitor metrics list \
+  --resource "/subscriptions/{subscription}/resourceGroups/{rg}/providers/Microsoft.ApiManagement/service/{apim}" \
+  --metric "Requests" \
+  --filter "ResponseCode eq '503'"
+
+# 失败率监控  
+az monitor metrics list \
+  --resource "/subscriptions/{subscription}/resourceGroups/{rg}/providers/Microsoft.ApiManagement/service/{apim}" \
+  --metric "FailedRequests"
+```
+
+**业务指标集成**:
+```csharp
+// Circuit Breaker状态指标 (如果需要应用层监控)
+public static readonly Gauge CircuitBreakerState = Prometheus.Metrics
+    .CreateGauge("bidone_circuit_breaker_state", "Circuit breaker state (0=closed, 1=open)",
+        new[] { "service", "endpoint" });
+
+// 熔断事件计数
+public static readonly Counter CircuitBreakerTrips = Prometheus.Metrics
+    .CreateCounter("bidone_circuit_breaker_trips_total", "Total circuit breaker trips",
+        new[] { "service", "reason" });
+```
+
+#### 10.5 最佳实践建议
+
+**当前架构优势**:
+- ✅ **零代码实现**: 无需在应用中编写熔断逻辑
+- ✅ **基础设施管理**: 通过Bicep模板统一管理
+- ✅ **性能优化**: 在网关层直接拦截，避免后端压力
+- ✅ **集中配置**: 所有API的熔断策略统一管理
+
+**建议的补充实现**:
+```csharp
+// 可以添加应用层监控来增强可观测性
+public class CircuitBreakerMetrics
+{
+    public static void RecordCircuitBreakerEvent(string service, string state)
+    {
+        CircuitBreakerState.WithLabels(service, "api-gateway").Set(state == "open" ? 1 : 0);
+        
+        if (state == "open")
+        {
+            CircuitBreakerTrips.WithLabels(service, "failure-threshold-exceeded").Inc();
+        }
+    }
+}
+```
+
+**使用建议**:
+1. **继续使用API Management Circuit Breaker**作为主要实现
+2. **考虑添加应用层Circuit Breaker**用于内部服务调用保护
+3. **增强监控和告警**，及时发现熔断事件
+4. **定期评估熔断阈值**，确保最优的用户体验
 
 ## 7. 项目开发详细指南
 
