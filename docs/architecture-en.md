@@ -1852,7 +1852,229 @@ public async Task<string> EnrichOrderFromServiceBus(
 }
 ```
 
-**3. Real-time Metrics Processing**
+**3. Order Processing Bridge Function - New Bridge Mechanism** 🆕
+
+To complete the integration from the `order-processing` queue to the `Internal System API`, we've added a crucial bridge function:
+
+```csharp
+[Function("ProcessOrderBridge")]
+public async Task ProcessOrderBridge(
+    [ServiceBusTrigger("order-processing", Connection = "ServiceBusConnection")] string orderMessage)
+{
+    var correlationId = Guid.NewGuid().ToString();
+    _logger.LogInformation("🔗 Order processing bridge triggered. CorrelationId: {CorrelationId}", correlationId);
+
+    try
+    {
+        // Deserialize ProcessOrderRequest message
+        var processingRequest = JsonSerializer.Deserialize<ProcessOrderRequest>(orderMessage);
+        
+        if (processingRequest?.Order == null)
+        {
+            throw new InvalidOperationException("Invalid ProcessOrderRequest data in message");
+        }
+
+        var orderId = processingRequest.Order.Id;
+        
+        // 📊 Start monitoring processing time
+        var stopwatch = Stopwatch.StartNew();
+
+        // Health check Internal System API
+        var isApiHealthy = await _internalApiClient.IsHealthyAsync();
+        if (!isApiHealthy)
+        {
+            _logger.LogWarning("Internal System API health check failed for order {OrderId}", orderId);
+        }
+
+        // Forward order to Internal System API
+        var orderResponse = await _internalApiClient.ProcessOrderAsync(processingRequest);
+
+        // 📊 Record processing time and success metrics
+        BusinessMetrics.OrderProcessingTime.WithLabels("OrderProcessingBridge", "ProcessOrder")
+            .Observe(stopwatch.Elapsed.TotalSeconds);
+        BusinessMetrics.OrdersProcessed.WithLabels("confirmed", "OrderProcessingBridge").Inc();
+
+        // Publish completion event for monitoring and downstream systems
+        await PublishOrderProcessedEvent(processingRequest.Order, orderResponse, correlationId);
+
+        _logger.LogInformation("Order {OrderId} successfully processed via Internal System API with status {Status}",
+            orderId, orderResponse.Status);
+
+        // If order is confirmed, the entire processing pipeline is complete
+        if (orderResponse.Status == OrderStatus.Confirmed)
+        {
+            _logger.LogInformation("🎉 Order {OrderId} processing pipeline completed successfully. Final status: {Status}",
+                orderId, orderResponse.Status);
+        }
+    }
+    catch (ArgumentException ex)
+    {
+        // Invalid data - don't retry, move to dead letter queue
+        _logger.LogError(ex, "Invalid order data in processing request. Moving to dead letter queue.");
+        BusinessMetrics.OrdersProcessed.WithLabels("failed_validation", "OrderProcessingBridge").Inc();
+        throw;
+    }
+    catch (UnauthorizedAccessException ex)
+    {
+        // Authentication failure - might be transient, trigger retry
+        _logger.LogError(ex, "Authentication failed for Internal System API. Will retry.");
+        BusinessMetrics.OrdersProcessed.WithLabels("failed_auth", "OrderProcessingBridge").Inc();
+        throw;
+    }
+    catch (TimeoutException ex)
+    {
+        // Timeout - likely transient, trigger retry
+        _logger.LogError(ex, "Timeout calling Internal System API. Will retry.");
+        BusinessMetrics.OrdersProcessed.WithLabels("failed_timeout", "OrderProcessingBridge").Inc();
+        throw;
+    }
+    catch (HttpRequestException ex)
+    {
+        // HTTP error - might be transient, trigger retry
+        _logger.LogError(ex, "HTTP error calling Internal System API. Will retry.");
+        BusinessMetrics.OrdersProcessed.WithLabels("failed_http", "OrderProcessingBridge").Inc();
+        throw;
+    }
+    catch (Exception ex)
+    {
+        // Unexpected error - trigger retry, eventually move to dead letter queue
+        _logger.LogError(ex, "Unexpected error processing order via Internal System API bridge.");
+        BusinessMetrics.OrdersProcessed.WithLabels("failed_unexpected", "OrderProcessingBridge").Inc();
+        throw;
+    }
+}
+```
+
+**Bridge Mechanism Architecture Features**:
+
+1. **Comprehensive Error Handling**: Differentiate between error types and apply appropriate retry strategies
+2. **Observability Integration**: Complete logging, metrics collection, and event publishing
+3. **Health Checking**: Check target API availability before processing
+4. **Performance Monitoring**: Record processing time and various failure type metrics
+5. **Correlation Tracking**: Generate unique CorrelationId for each processing flow
+
+**HTTP Client Implementation**:
+
+```csharp
+public class InternalApiClient : IInternalApiClient
+{
+    private readonly HttpClient _httpClient;
+    private readonly IConfiguration _configuration;
+    private readonly ILogger<InternalApiClient> _logger;
+
+    public async Task<OrderResponse> ProcessOrderAsync(ProcessOrderRequest request, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var json = JsonSerializer.Serialize(request, _jsonOptions);
+            var content = new StringContent(json, Encoding.UTF8, "application/json");
+
+            // Add JWT authentication header (if available)
+            await AddAuthenticationHeaderAsync();
+
+            var response = await _httpClient.PostAsync("/api/orders", content, cancellationToken);
+
+            if (response.IsSuccessStatusCode)
+            {
+                var responseContent = await response.Content.ReadAsStringAsync(cancellationToken);
+                var orderResponse = JsonSerializer.Deserialize<OrderResponse>(responseContent, _jsonOptions);
+                return orderResponse ?? throw new InvalidOperationException("Failed to deserialize order response");
+            }
+
+            // Handle different HTTP error codes
+            var errorContent = await response.Content.ReadAsStringAsync(cancellationToken);
+            throw response.StatusCode switch
+            {
+                HttpStatusCode.BadRequest => new ArgumentException($"Invalid order data: {errorContent}"),
+                HttpStatusCode.Unauthorized => new UnauthorizedAccessException("Authentication failed"),
+                HttpStatusCode.NotFound => new InvalidOperationException($"Order not found: {errorContent}"),
+                HttpStatusCode.Conflict => new InvalidOperationException($"Order processing conflict: {errorContent}"),
+                _ => new HttpRequestException($"Internal System API error ({response.StatusCode}): {errorContent}")
+            };
+        }
+        catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
+        {
+            throw new TimeoutException($"Timeout processing order {request.Order.Id} via Internal System API", ex);
+        }
+    }
+
+    public async Task<bool> IsHealthyAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var response = await _httpClient.GetAsync("/health", cancellationToken);
+            return response.IsSuccessStatusCode;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+}
+```
+
+**Dependency Injection Configuration**:
+
+```csharp
+// Register bridge services in Program.cs
+services.AddHttpClient<IInternalApiClient, InternalApiClient>()
+    .AddInternalApiRetryPolicy(); // Includes retry and circuit breaker policies
+
+services.AddScoped<IInternalApiClient, InternalApiClient>();
+services.AddScoped<IMessagePublisher, ServiceBusMessagePublisher>();
+```
+
+**Configuration File**:
+
+```json
+{
+  "InternalApi": {
+    "BaseUrl": "http://localhost:5002", // Development environment
+    "JwtToken": ""                      // Development JWT Token (optional)
+  }
+}
+```
+
+**Complete Integration Flow Diagram**:
+
+```mermaid
+graph TB
+    subgraph "Azure Functions Processing Pipeline"
+        A[order-received queue] --> B[OrderValidationFunction]
+        B --> C[order-validated queue]
+        C --> D[OrderEnrichmentFunction]
+        D --> E[order-enriched queue]
+        E --> F[ProcessEnrichedOrder]
+        F --> G[order-processing queue]
+        G --> H[🆕 ProcessOrderBridge]
+    end
+    
+    subgraph "Internal System API"
+        I[HTTP POST /api/orders]
+        J[OrderProcessingService]
+        K[SQL Server Database]
+    end
+    
+    H --> |HTTP Call| I
+    I --> J
+    J --> K
+    
+    subgraph "Monitoring and Events"
+        L[Prometheus Metrics]
+        M[OrderProcessedEvent]
+        N[Application Insights]
+    end
+    
+    H --> L
+    H --> M
+    H --> N
+    
+    style H fill:#e1f5fe,stroke:#01579b,stroke-width:3px
+    style G fill:#fff3e0,stroke:#ef6c00,stroke-width:2px
+    style I fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
+```
+
+**4. Real-time Metrics Processing**
 ```csharp
 [Function("ProcessDashboardMetrics")]
 public async Task ProcessDashboardMetrics(

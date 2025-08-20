@@ -2595,7 +2595,229 @@ public async Task<string> EnrichOrderFromServiceBus(
 }
 ```
 
-**3. 实时指标处理**
+**3. 订单处理桥接函数 - 新增桥接机制** 🆕
+
+为了完成从 `order-processing` 队列到 `Internal System API` 的集成，我们添加了一个关键的桥接函数：
+
+```csharp
+[Function("ProcessOrderBridge")]
+public async Task ProcessOrderBridge(
+    [ServiceBusTrigger("order-processing", Connection = "ServiceBusConnection")] string orderMessage)
+{
+    var correlationId = Guid.NewGuid().ToString();
+    _logger.LogInformation("🔗 Order processing bridge triggered. CorrelationId: {CorrelationId}", correlationId);
+
+    try
+    {
+        // 反序列化 ProcessOrderRequest 消息
+        var processingRequest = JsonSerializer.Deserialize<ProcessOrderRequest>(orderMessage);
+        
+        if (processingRequest?.Order == null)
+        {
+            throw new InvalidOperationException("Invalid ProcessOrderRequest data in message");
+        }
+
+        var orderId = processingRequest.Order.Id;
+        
+        // 📊 开始监控处理时间
+        var stopwatch = Stopwatch.StartNew();
+
+        // 健康检查 Internal System API
+        var isApiHealthy = await _internalApiClient.IsHealthyAsync();
+        if (!isApiHealthy)
+        {
+            _logger.LogWarning("Internal System API health check failed for order {OrderId}", orderId);
+        }
+
+        // 转发订单到 Internal System API
+        var orderResponse = await _internalApiClient.ProcessOrderAsync(processingRequest);
+
+        // 📊 记录处理时间和成功指标
+        BusinessMetrics.OrderProcessingTime.WithLabels("OrderProcessingBridge", "ProcessOrder")
+            .Observe(stopwatch.Elapsed.TotalSeconds);
+        BusinessMetrics.OrdersProcessed.WithLabels("confirmed", "OrderProcessingBridge").Inc();
+
+        // 发布完成事件供监控和下游系统使用
+        await PublishOrderProcessedEvent(processingRequest.Order, orderResponse, correlationId);
+
+        _logger.LogInformation("Order {OrderId} successfully processed via Internal System API with status {Status}",
+            orderId, orderResponse.Status);
+
+        // 如果订单已确认，整个处理管道完成
+        if (orderResponse.Status == OrderStatus.Confirmed)
+        {
+            _logger.LogInformation("🎉 Order {OrderId} processing pipeline completed successfully. Final status: {Status}",
+                orderId, orderResponse.Status);
+        }
+    }
+    catch (ArgumentException ex)
+    {
+        // 数据无效 - 不重试，移至死信队列
+        _logger.LogError(ex, "Invalid order data in processing request. Moving to dead letter queue.");
+        BusinessMetrics.OrdersProcessed.WithLabels("failed_validation", "OrderProcessingBridge").Inc();
+        throw;
+    }
+    catch (UnauthorizedAccessException ex)
+    {
+        // 认证失败 - 可能是临时的，触发重试
+        _logger.LogError(ex, "Authentication failed for Internal System API. Will retry.");
+        BusinessMetrics.OrdersProcessed.WithLabels("failed_auth", "OrderProcessingBridge").Inc();
+        throw;
+    }
+    catch (TimeoutException ex)
+    {
+        // 超时 - 可能是临时的，触发重试
+        _logger.LogError(ex, "Timeout calling Internal System API. Will retry.");
+        BusinessMetrics.OrdersProcessed.WithLabels("failed_timeout", "OrderProcessingBridge").Inc();
+        throw;
+    }
+    catch (HttpRequestException ex)
+    {
+        // HTTP错误 - 可能是临时的，触发重试
+        _logger.LogError(ex, "HTTP error calling Internal System API. Will retry.");
+        BusinessMetrics.OrdersProcessed.WithLabels("failed_http", "OrderProcessingBridge").Inc();
+        throw;
+    }
+    catch (Exception ex)
+    {
+        // 意外错误 - 触发重试，最终移至死信队列
+        _logger.LogError(ex, "Unexpected error processing order via Internal System API bridge.");
+        BusinessMetrics.OrdersProcessed.WithLabels("failed_unexpected", "OrderProcessingBridge").Inc();
+        throw;
+    }
+}
+```
+
+**桥接机制架构特点**：
+
+1. **完整的错误处理**：区分不同类型的错误，采用相应的重试策略
+2. **可观测性集成**：完整的日志记录、指标收集和事件发布
+3. **健康检查**：在处理前检查目标API的可用性
+4. **性能监控**：记录处理时间和各种失败类型的指标
+5. **相关性追踪**：为每个处理流程生成唯一的CorrelationId
+
+**HTTP客户端实现**：
+
+```csharp
+public class InternalApiClient : IInternalApiClient
+{
+    private readonly HttpClient _httpClient;
+    private readonly IConfiguration _configuration;
+    private readonly ILogger<InternalApiClient> _logger;
+
+    public async Task<OrderResponse> ProcessOrderAsync(ProcessOrderRequest request, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var json = JsonSerializer.Serialize(request, _jsonOptions);
+            var content = new StringContent(json, Encoding.UTF8, "application/json");
+
+            // 添加JWT认证头（如果可用）
+            await AddAuthenticationHeaderAsync();
+
+            var response = await _httpClient.PostAsync("/api/orders", content, cancellationToken);
+
+            if (response.IsSuccessStatusCode)
+            {
+                var responseContent = await response.Content.ReadAsStringAsync(cancellationToken);
+                var orderResponse = JsonSerializer.Deserialize<OrderResponse>(responseContent, _jsonOptions);
+                return orderResponse ?? throw new InvalidOperationException("Failed to deserialize order response");
+            }
+
+            // 处理不同的HTTP错误码
+            var errorContent = await response.Content.ReadAsStringAsync(cancellationToken);
+            throw response.StatusCode switch
+            {
+                HttpStatusCode.BadRequest => new ArgumentException($"Invalid order data: {errorContent}"),
+                HttpStatusCode.Unauthorized => new UnauthorizedAccessException("Authentication failed"),
+                HttpStatusCode.NotFound => new InvalidOperationException($"Order not found: {errorContent}"),
+                HttpStatusCode.Conflict => new InvalidOperationException($"Order processing conflict: {errorContent}"),
+                _ => new HttpRequestException($"Internal System API error ({response.StatusCode}): {errorContent}")
+            };
+        }
+        catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
+        {
+            throw new TimeoutException($"Timeout processing order {request.Order.Id} via Internal System API", ex);
+        }
+    }
+
+    public async Task<bool> IsHealthyAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var response = await _httpClient.GetAsync("/health", cancellationToken);
+            return response.IsSuccessStatusCode;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+}
+```
+
+**依赖注入配置**：
+
+```csharp
+// 在 Program.cs 中注册桥接服务
+services.AddHttpClient<IInternalApiClient, InternalApiClient>()
+    .AddInternalApiRetryPolicy(); // 包含重试和熔断策略
+
+services.AddScoped<IInternalApiClient, InternalApiClient>();
+services.AddScoped<IMessagePublisher, ServiceBusMessagePublisher>();
+```
+
+**配置文件**：
+
+```json
+{
+  "InternalApi": {
+    "BaseUrl": "http://localhost:5002", // 开发环境
+    "JwtToken": ""                      // 开发环境JWT Token（可选）
+  }
+}
+```
+
+**完整集成流程图**：
+
+```mermaid
+graph TB
+    subgraph "Azure Functions 处理管道"
+        A[order-received 队列] --> B[OrderValidationFunction]
+        B --> C[order-validated 队列]
+        C --> D[OrderEnrichmentFunction]
+        D --> E[order-enriched 队列]
+        E --> F[ProcessEnrichedOrder]
+        F --> G[order-processing 队列]
+        G --> H[🆕 ProcessOrderBridge]
+    end
+    
+    subgraph "Internal System API"
+        I[HTTP POST /api/orders]
+        J[OrderProcessingService]
+        K[SQL Server Database]
+    end
+    
+    H --> |HTTP调用| I
+    I --> J
+    J --> K
+    
+    subgraph "监控和事件"
+        L[Prometheus指标]
+        M[OrderProcessedEvent]
+        N[Application Insights]
+    end
+    
+    H --> L
+    H --> M
+    H --> N
+    
+    style H fill:#e1f5fe,stroke:#01579b,stroke-width:3px
+    style G fill:#fff3e0,stroke:#ef6c00,stroke-width:2px
+    style I fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
+```
+
+**4. 实时指标处理**
 ```csharp
 [Function("ProcessDashboardMetrics")]
 public async Task ProcessDashboardMetrics(

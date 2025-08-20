@@ -55,14 +55,22 @@ var host = new HostBuilder()
                 new Azure.Messaging.ServiceBus.ServiceBusClient(serviceBusConnectionString));
         }
 
-        // Add HTTP client
+        // Add message publisher for event publishing
+        services.AddScoped<BidOne.Shared.Services.IMessagePublisher, ServiceBusMessagePublisher>();
+
+        // Add HTTP clients
         services.AddHttpClient<IExternalDataService, ExternalDataService>();
+        
+        // Add Internal API client with retry policies
+        services.AddHttpClient<IInternalApiClient, InternalApiClient>()
+            .AddInternalApiRetryPolicy();
 
         // Add custom services
         services.AddScoped<IOrderValidationService, OrderValidationService>();
         services.AddScoped<IOrderEnrichmentService, OrderEnrichmentService>();
         services.AddScoped<IExternalDataService, ExternalDataService>();
         services.AddScoped<INotificationService, NotificationService>();
+        services.AddScoped<IInternalApiClient, InternalApiClient>();
     })
     .Build();
 
