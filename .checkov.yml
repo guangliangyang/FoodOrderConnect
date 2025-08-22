@@ -1,0 +1,67 @@
+# Checkov configuration for security and compliance scanning
+# https://www.checkov.io/
+
+# Global settings
+quiet: false
+compact: false
+output: cli
+
+# Framework settings
+framework: 
+  - terraform
+  - arm
+  - bicep
+
+# Skip specific checks (with justification)
+skip-check:
+  # Skip public IP checks for development environments
+  - CKV_AZURE_113  # Ensure that Network Security Group Flow Log retention period is 'greater than or equal to 90 days'
+  - CKV2_AZURE_1   # Ensure that Storage Account has SAS expiration policy
+
+# Severity levels to report
+severity:
+  - CRITICAL
+  - HIGH
+  - MEDIUM
+  # Skip LOW severity for faster CI/CD
+
+# Custom checks directory
+external-checks-dir: 
+  - .checkov/custom-checks
+
+# Exclude specific directories
+skip-path:
+  - node_modules/
+  - .terraform/
+  - .git/
+  - obj/
+  - bin/
+
+# Include only infrastructure directories
+directory:
+  - infra/
+
+# Soft fail mode (don't fail CI/CD on security issues, just report)
+soft-fail: false
+
+# Hard fail on these critical checks
+hard-fail-on:
+  - CKV_AZURE_33   # Ensure Storage Account is using the latest version of TLS encryption
+  - CKV_AZURE_44   # Ensure Storage Account is using the latest version of TLS encryption
+  - CKV_AZURE_109  # Ensure that key vault allows firewall rules settings
+  - CKV2_AZURE_8   # Ensure the storage account has encryption enabled
+
+# Custom policies directory
+policy-metadata-filter: "BC_"
+
+# Output formats
+output-format:
+  - cli
+  - sarif
+  - json
+
+# Enable secrets scanning
+enable-secret-scan-all-files: true
+
+# Download external modules for scanning
+download-external-modules: true

@@ -1,0 +1,89 @@
+# Pre-commit hooks configuration for IaC quality assurance
+# Install with: pre-commit install
+
+repos:
+  # Terraform hooks
+  - repo: https://github.com/antonbabenko/pre-commit-terraform
+    rev: v1.88.0
+    hooks:
+      - id: terraform_fmt
+        args:
+          - --args=-recursive
+      - id: terraform_validate
+        args:
+          - --hook-config=--retry-once-with-cleanup=true
+      - id: terraform_tflint
+        args:
+          - --args=--config=__GIT_WORKING_DIR__/.tflint.hcl
+      - id: terraform_checkov
+        args:
+          - --args=--config-file __GIT_WORKING_DIR__/.checkov.yml
+      - id: terraform_tfsec
+        args:
+          - --args=--config-file __GIT_WORKING_DIR__/.tfsec.yml
+
+  # General hooks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: \.md$
+      - id: end-of-file-fixer
+        exclude: \.md$
+      - id: check-yaml
+        args: ['--allow-multiple-documents']
+      - id: check-json
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: ['--maxkb=1000']
+      - id: detect-private-key
+      - id: detect-aws-credentials
+
+  # YAML formatting
+  - repo: https://github.com/pre-commit/mirrors-prettier
+    rev: v3.1.0
+    hooks:
+      - id: prettier
+        files: \.(yml|yaml)$
+        args: ['--write', '--prose-wrap', 'always']
+
+  # Security scanning
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.4.0
+    hooks:
+      - id: detect-secrets
+        args: ['--baseline', '.secrets.baseline']
+
+  # Custom hooks for BidOne project
+  - repo: local
+    hooks:
+      - id: bicep-validation
+        name: Validate Bicep templates
+        entry: scripts/validate-bicep.sh
+        language: script
+        files: \.bicep$
+        pass_filenames: false
+        
+      - id: terraform-cost-check
+        name: Terraform cost estimation
+        entry: scripts/cost-check.sh
+        language: script
+        files: \.tf$|\.tfvars$
+        pass_filenames: false
+        
+      - id: check-naming-convention
+        name: Check resource naming convention
+        entry: scripts/check-naming.py
+        language: python
+        files: \.tf$|\.bicep$
+        
+      - id: validate-tags
+        name: Validate required tags
+        entry: scripts/validate-tags.py
+        language: python
+        files: \.tf$|\.bicep$
+
+# Configuration
+default_stages: [commit]
+fail_fast: false
+minimum_pre_commit_version: 3.0.0

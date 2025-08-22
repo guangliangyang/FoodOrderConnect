@@ -1,0 +1,89 @@
+# PSRule for Azure configuration
+# https://azure.github.io/PSRule.Rules.Azure/
+
+# Input configuration
+input:
+  pathIgnore:
+    - '*.Designer.cs'
+    - 'bin/**'
+    - 'obj/**'
+    - '.terraform/**'
+    - 'node_modules/**'
+  targetType:
+    - Microsoft.Resources/deployments
+    - Microsoft.Resources/deployments/outputs
+
+# Configuration options
+configuration:
+  # Enable Azure Resource Manager template validation
+  AZURE_RESOURCE_GROUP: 'rg-bidone'
+  AZURE_SUBSCRIPTION_ID: ''  # Will be set in CI/CD
+  
+  # Baseline configuration
+  AZURE_AKS_CLUSTER_USER_POOL_MINIMUM_NODES: 2
+  AZURE_AKS_CLUSTER_USER_POOL_MAXIMUM_NODES: 10
+  
+  # Storage configuration
+  AZURE_STORAGE_SECURE_TRANSFER_REQUIRED: true
+  AZURE_STORAGE_USE_REPLICATION: 'Standard_LRS'
+  
+  # SQL Database configuration
+  AZURE_SQL_DATABASE_BACKUP_RETENTION: 7
+  AZURE_SQL_DATABASE_AUDIT_ENABLED: true
+  
+  # Key Vault configuration
+  AZURE_KEYVAULT_SOFT_DELETE: true
+  AZURE_KEYVAULT_PURGE_PROTECTION: true
+
+# Rule configuration
+rule:
+  # Include all Azure rules
+  include:
+    - Azure.*
+  
+  # Exclude rules that don't apply to our environment
+  exclude:
+    # Development environment specific exclusions
+    - Azure.VM.BasicSku  # Allow basic SKUs for dev
+    - Azure.Storage.MinTls  # Will be handled by Bicep parameters
+    
+  # Custom rule configuration
+  Azure.Resource.UseTags:
+    required:
+      - Environment
+      - Project
+      - ManagedBy
+    
+  Azure.SQL.ThreatDetection:
+    enabled: true
+    
+  Azure.Storage.SecureTransfer:
+    enabled: true
+
+# Output configuration
+output:
+  as: Summary
+  culture: en-US
+  footer: Default
+  format: Wide
+  jobSummaryPath: ''
+  outcomeColor: true
+  path: ''
+  sarifPath: 'psrule-results.sarif'
+  style: AzurePipelines
+
+# Execution configuration
+execution:
+  languageMode: FullLanguage
+  restrictScriptSource: Unrestricted
+  suppressionGroupExpired: Warn
+  ruleInconclusive: Warn
+  ruleSuppressionGroupExpired: Warn
+  unprocessedObject: Warn
+
+# Logging configuration
+logging:
+  limitDebug: ''
+  limitVerbose: ''
+  ruleFail: Error
+  rulePass: Information

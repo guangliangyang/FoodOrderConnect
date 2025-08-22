@@ -1,0 +1,51 @@
+# tfsec configuration for Terraform security scanning
+# https://aquasecurity.github.io/tfsec/
+
+# Severity levels to include
+severity:
+  - CRITICAL
+  - HIGH
+  - MEDIUM
+  # Exclude LOW for faster CI/CD
+
+# Exclude specific checks with justification
+exclude:
+  # Allow HTTP for development environments
+  - azure-keyvault-ensure-key-expiry  # Keys will be managed separately
+  - azure-storage-use-secure-tls-policy  # Will be enforced via parameters
+
+# Include only these directories
+include:
+  - infra/terraform
+
+# Exclude directories
+exclude-paths:
+  - .terraform/
+  - node_modules/
+  - .git/
+
+# Custom checks directory
+custom-checks-dir: .tfsec/custom
+
+# Minimum severity to fail on
+minimum-severity: HIGH
+
+# Output configuration
+format: default
+soft-fail: false
+
+# Enforce specific checks
+force-all-dirs: true
+allow-checks-to-fail: false
+
+# Environment-specific configuration
+config-file-vars:
+  environment: dev  # Will be overridden in CI/CD
+
+# Custom variables for dynamic checking
+vars:
+  project_name: "bidone"
+  allowed_locations:
+    - "East US"
+    - "West US 2"
+    - "Central US"

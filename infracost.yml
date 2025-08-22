@@ -1,0 +1,98 @@
+# Infracost configuration for cost estimation
+# https://www.infracost.io/docs/
+
+version: 0.1
+
+# Project configuration
+projects:
+  # Terraform projects
+  - path: infra/terraform
+    name: bidone-terraform
+    terraform_var_files:
+      - environments/dev.tfvars
+    usage_file: infra/terraform/usage.yml
+    
+  # Bicep projects (converted to JSON for cost analysis)
+  - path: infra/bicep
+    name: bidone-bicep
+    terraform_binary: terraform  # Use terraform for cost analysis
+
+# Global settings
+settings:
+  currency: USD
+  
+  # Cost thresholds
+  thresholds:
+    # Fail if monthly cost increase is more than $100
+    monthly_cost_increase: 100
+    # Warn if monthly cost increase is more than $50
+    monthly_cost_increase_warning: 50
+    # Fail if total monthly cost exceeds $500
+    total_monthly_cost: 500
+
+# Resource usage patterns for accurate cost estimation
+usage:
+  # Azure SQL Database usage
+  azurerm_sql_database:
+    monthly_requests: 100000
+    monthly_storage_gb: 10
+    
+  # Azure Functions usage
+  azurerm_function_app:
+    monthly_requests: 1000000
+    request_duration_ms: 500
+    memory_mb: 128
+    
+  # Azure Service Bus usage
+  azurerm_servicebus_namespace:
+    monthly_messages: 1000000
+    message_size_kb: 64
+    
+  # Azure Cosmos DB usage
+  azurerm_cosmosdb_account:
+    monthly_requests: 100000
+    monthly_storage_gb: 10
+    
+  # Azure Redis Cache usage
+  azurerm_redis_cache:
+    monthly_requests: 1000000
+    
+  # Azure Storage Account usage
+  azurerm_storage_account:
+    monthly_storage_gb: 100
+    monthly_requests: 100000
+    
+  # Azure Application Insights usage
+  azurerm_application_insights:
+    monthly_data_ingestion_gb: 5
+
+# Environment-specific configurations
+environments:
+  dev:
+    currency: USD
+    usage_multiplier: 0.5  # Dev environment uses less resources
+    
+  staging:
+    currency: USD
+    usage_multiplier: 0.8  # Staging uses 80% of production load
+    
+  prod:
+    currency: USD
+    usage_multiplier: 1.0  # Full production load
+
+# Output configuration
+output:
+  format: table
+  show_skipped: false
+  group_by: project
+  
+# Integration settings
+integrations:
+  # GitHub integration
+  github:
+    enabled: true
+    pull_request_comment: true
+    
+  # Azure DevOps integration
+  azure_devops:
+    enabled: false

@@ -1,0 +1,75 @@
+# Terraform usage file for Infracost
+# This file defines usage patterns for resources to get accurate cost estimates
+
+version: 0.1
+
+# Resource usage patterns
+resource_usage:
+  # SQL Server and Database
+  azurerm_mssql_server.main:
+    compute_type: "provisioned"
+    backup_storage_gb: 100
+    
+  azurerm_mssql_database.main:
+    monthly_vcore_hours: 744  # 24/7 operation
+    backup_storage_gb: 50
+    
+  # Cosmos DB
+  azurerm_cosmosdb_account.main:
+    monthly_requests:
+      - operation: "write"
+        requests: 100000
+      - operation: "read"
+        requests: 500000
+    storage_gb: 50
+    backup_storage_gb: 10
+    
+  # Service Bus
+  azurerm_servicebus_namespace.main:
+    monthly_messages: 1000000
+    
+  # Redis Cache
+  azurerm_redis_cache.main:
+    monthly_requests: 1000000
+    
+  # Storage Account
+  azurerm_storage_account.main:
+    storage:
+      - storage_type: "hot"
+        storage_gb: 100
+      - storage_type: "cool"
+        storage_gb: 50
+    monthly_requests:
+      - operation: "write"
+        requests: 100000
+      - operation: "read"
+        requests: 500000
+    monthly_data_retrieval_gb: 10
+    
+  # Application Insights
+  azurerm_application_insights.main:
+    monthly_data_ingestion_gb: 5
+    monthly_requests: 1000000
+    
+  # Log Analytics Workspace
+  azurerm_log_analytics_workspace.main:
+    monthly_data_ingestion_gb: 10
+    
+  # Key Vault
+  azurerm_key_vault.main:
+    monthly_requests: 10000
+    certificate_renewal_requests: 12
+    
+  # Container Registry
+  azurerm_container_registry.main:
+    storage_gb: 50
+    monthly_requests: 100000
+
+# Environment-specific multipliers
+environment_usage:
+  dev:
+    multiplier: 0.3
+  staging:
+    multiplier: 0.7
+  prod:
+    multiplier: 1.0
