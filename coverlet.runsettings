@@ -13,7 +13,7 @@
           <UseSourceLink>true</UseSourceLink>
           <IncludeTestAssembly>false</IncludeTestAssembly>
           <SkipAutoProps>true</SkipAutoProps>
-          <DeterministicReport>true</DeterministicReport>
+          <DeterministicReport>false</DeterministicReport>
           <ThresholdForCyclomaticComplexity>20</ThresholdForCyclomaticComplexity>
         </Configuration>
       </DataCollector>
