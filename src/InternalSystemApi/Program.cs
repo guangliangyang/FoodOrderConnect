@@ -273,3 +273,6 @@ finally
 
 // Note: HTTP retry policy can be configured through dependency injection
 // This helper method has been simplified for demo purposes
+
+// Make Program accessible for integration testing
+public partial class Program { }

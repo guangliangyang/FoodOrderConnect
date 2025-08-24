@@ -1,5 +1,6 @@
 using BidOne.Shared.Domain.ValueObjects;
 using FluentAssertions;
+using Xunit;
 
 namespace BidOne.Shared.Tests.Domain.ValueObjects;
 
